@@ -90,13 +90,18 @@ def parse_args():
     parser.add_argument(
         "--warmup",
         type=int,
-        required=True,
+        default=-1,
         help="Warm up steps."
+    )
+    parser.add_argument(
+        "--train_epoch",
+        type=int,
+        required=True,
+        help="The number of train epochs."
     )
     parser.add_argument(
         "--max_step",
         type=int,
-        required=True,
         help="The max step of fine-tune."
     )
     parser.add_argument(
@@ -210,12 +215,16 @@ def preprocess_dataset(dataset_name, dir_name, tokenizer, max_length, seed):
 
     dataset = datas.map(create_prompt_formats)#, batched=True)
     
+    remove_col = ["Question", "Answer", "Rationale", "text"]
+    if "Opinion" in dataset.column_names:
+        remove_col.append("Opinion")
+    
     # Apply preprocessing to each batch of the dataset & and remove texts
     _preprocessing_function = partial(preprocess_batch, max_length=max_length, tokenizer=tokenizer)
     dataset = dataset.map(
         _preprocessing_function,
         batched=True,
-        remove_columns=["Question", "Answer", "Opinion", "Rationale", "text"],
+        remove_columns=remove_col,
     )
 
     # Filter out samples that have input_ids exceeding max_length
@@ -286,7 +295,7 @@ def print_trainable_parameters(model, use_4bit=False):
         f"all params: {all_param:,d} || trainable params: {trainable_params:,d} || trainable%: {100 * trainable_params / all_param}"
     )
 
-def train(model, tokenizer, dataset, output_dir, args):
+def train(model, tokenizer, dataset, log_dir,output_dir, args):
     # Apply preprocessing to the model to prepare it by
     # 1 - Enabling gradient checkpointing to reduce memory usage during fine-tuning
     model.gradient_checkpointing_enable()
@@ -305,20 +314,22 @@ def train(model, tokenizer, dataset, output_dir, args):
     
     # Print information about the percentage of trainable parameters
     print_trainable_parameters(model)
-    
+
+
     # Training parameters
     trainer = Trainer(
         model=model,
         train_dataset=dataset['train'],
         args=TrainingArguments(
-            per_device_train_batch_size=args.batch_size, 
-            gradient_accumulation_steps=args.grad_acc_step,
+            per_device_train_batch_size=args.batch_size, # actual batch_size=micro_batch_size*grad_acc_step
+            gradient_accumulation_steps=args.grad_acc_step, 
             warmup_steps=args.warmup,
-            max_steps=args.max_step,
+            # max_steps=args.max_step,
+            num_train_epochs=args.train_epoch,
             learning_rate=args.lr,
             fp16=True,
             logging_steps=1,
-            output_dir="../log",
+            output_dir=os.path.join("../log",log_dir),
             optim="paged_adamw_8bit",
         ),
         data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False)
@@ -379,7 +390,7 @@ if __name__ == "__main__":
     
     args = parse_args()
     print(args)
-    exit()
+    
     model_name = args.model_name
 
     output_dir = os.path.join("../result/model",model_name)
@@ -419,18 +430,21 @@ if __name__ == "__main__":
     print(dataset)
     print(dataset['train'][0])
     
-    train(model,tokenizer,dataset,output_dir)
+    train(model,tokenizer,dataset,dir_name,output_dir,args)
 
     output_merged_dir = os.path.join("../result/ckpt",model_name)
     os.makedirs(output_merged_dir,exist_ok=True)
 
-    print("Saving model...")
+    print("Merging LoRA and Saving model...")
     model = AutoPeftModelForCausalLM.from_pretrained(output_dir, device_map="auto", torch_dtype=torch.bfloat16)
-    model = model.merge_and_unload() # 将PEFT模型的参数合并到基础模型中，并释放PEFT模型的内存空间
     print(model)
+    model = model.merge_and_unload() # 将PEFT模型的参数合并到基础模型中，并释放PEFT模型的内存空间
     model.save_pretrained(output_merged_dir, safe_serialization=True)
+    print("=======================================")
+    print(model)
     tokenizer.save_pretrained(output_merged_dir)
     
+
     print("Evaluate model...")
     eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
     

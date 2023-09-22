@@ -1,4 +1,4 @@
-python ../SILM/data_process.py \
+python ../poli/data_process.py \
     --large_model "meta-llama/Llama-2-7b-chat-hf" \
     --small_model "google/flan-t5-small" \
     --dataset "qasc" \

@@ -35,8 +35,10 @@ def inference_eval(model,tokenizer,eval_data,opinion = False):
                 reply = lm(input,do_sample=True, top_k=10,num_return_sequences=1, 
                         eos_token_id=tokenizer.eos_token_id,max_length=500)[0]['generated_text']
                 answer,_ = extract_ar(reply.split("Answer:")[-1])
+                print(answer,end="")
                 if answer == item['answerKey']:
                     acc_count += 1
+                    print("*",end=" ")
                 pbar.update(1)
             result['ACC'] = acc_count / num_of_question
         # 有opinion，每个问题，各个opinion        
