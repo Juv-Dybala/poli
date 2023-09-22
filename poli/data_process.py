@@ -125,7 +125,6 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
     dataset_acc = {"wo":0,"right":0,"wrong":0}
     vote_count = 0  # 判断投票得出的结果与数据集提供答案的一致性 
     doubtful_answer_count = 0 # 判断多少数据集答案可疑
-    pass_rate_count = 0
     pass_step1_count = 0
     pass_step2_count = 0
     
@@ -136,7 +135,8 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
         dataset_acc["right"] = log["acc_right_count"]
         dataset_acc["wrong"] = log["acc_wrong_count"]
         vote_count = log["voting_answer_count"]
-        pass_rate_count = log["passing_rate_count"]
+        pass_step1_count = log["pass_step1_count"]
+        pass_step2_count = log["pass_step2_count"] # 留下的是通过两步筛选的
     else:
         fl = open(log_save_directory,mode="w")
 
@@ -208,11 +208,14 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
                             question = question,ground_answer = answer,
                             pre_filter_rationales = pre_filter_rationales)
             # print(golden_rationales)
-            pass_step2_count += len(pre_filter_rationales)
+            pass_step2_count += len(golden_rationales)
             print("After selection,there are {} rationale(s) left.".format(len(golden_rationales)))
-            pass_rate = len(golden_rationales)/len(pre_filter_rationales)
-            pass_rate_count += pass_rate
-            print("Passing rate: {},temporary average passing rate is {}".format(pass_rate,pass_rate_count/i))
+
+            if pass_step1_count:
+                pass_step2_rate = pass_step2_count/pass_step1_count
+            else:
+                pass_step2_rate = 0.0
+            print("Temporary average passing rate is {}".format(pass_step2_rate))
 
         else:
             golden_rationales = pre_filter_rationales
@@ -235,7 +238,8 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
                   "acc_right_count":dataset_acc["right"],
                   "acc_wrong_count":dataset_acc["wrong"],
                   "voting_answer_count":vote_count,
-                  "passing_rate_count":pass_rate_count}
+                  "pass_step1_count":pass_step1_count,
+                  "pass_step2_count":pass_step2_count}
         fl.write(json.dumps(log_in,ensure_ascii=False))
         
     
@@ -335,10 +339,10 @@ def dataset_download(dataset_name):
 
 def model_download(model_name):
     # 下载模型到本地
-    model_name = ""
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name)
+    # model = T5ForConditionalGeneration.from_pretrained(model_name)
     print(model)
 
     pt_save_directory = os.path.join("../models",model_name) 
