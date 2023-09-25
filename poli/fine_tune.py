@@ -383,6 +383,7 @@ def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
     print(eval_data)
     
     result = inference_eval(model,tokenizer,eval_data,opinion)
+    print("")
     print(result)
     
 
@@ -393,13 +394,15 @@ if __name__ == "__main__":
     
     model_name = args.model_name
 
-    output_dir = os.path.join("../result/model",model_name)
+    output_dir = os.path.join("../result/lora_model",model_name)
+    os.makedirs(output_dir,exist_ok=True)
+    output_merged_dir = os.path.join("../result/ckpt",model_name)
+    
     original_model_save_directory = os.path.join("../models",model_name)
-    if os.path.exists(output_dir):
-        model_save_directory = output_dir
+    if os.path.exists(output_merged_dir):
+        model_save_directory = output_merged_dir
     else:
         model_save_directory = original_model_save_directory
-    # os.makedirs(output_dir,exist_ok=True)
 
     bnb_config = create_bnb_config()
     model = AutoModelForCausalLM.from_pretrained(model_save_directory,
@@ -417,8 +420,8 @@ if __name__ == "__main__":
         dir_name = args.dir_name
     else:
         dir_name = dataset_name
-    # 测评初始模型在数据集上的表现
-    # eval(model,tokenizer,dataset_name,split="validation",opinion=False)
+    # 测评初始或已保存模型在数据集上的表现
+    # eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
     # exit()
 
 
@@ -432,7 +435,6 @@ if __name__ == "__main__":
     
     train(model,tokenizer,dataset,dir_name,output_dir,args)
 
-    output_merged_dir = os.path.join("../result/ckpt",model_name)
     os.makedirs(output_merged_dir,exist_ok=True)
 
     print("Merging LoRA and Saving model...")
