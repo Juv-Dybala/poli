@@ -11,7 +11,7 @@ python ../poli/fine_tune.py \
     --warmup 100 \
     --train_epoch 3 \
     --lr 3e-4 \
-    --dir_name "self_consistency1" \
+    --dir_name "step1" \
     
     # --max_step 20 \
     # --eval_opinion

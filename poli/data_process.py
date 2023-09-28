@@ -4,11 +4,12 @@ from transformers import pipeline,AutoTokenizer,AutoModelForCausalLM,T5ForCondit
 from datasets import load_dataset
 import os.path
 import re
-from pre_filter import generate_answer
+from pre_filter import generate_answer,using_qa_generate_rationale
 from refined_selection import select_rationale
 import json
 import random
 import argparse
+from tqdm import tqdm
 
 
 def parse_args():
@@ -65,6 +66,12 @@ def parse_args():
         type=str,
         help="When generating processed data, the alias directory name."
     )
+    parser.add_argument(
+        "--qa2r",
+        type=int,
+        default=0,
+        help="When there is no rationale left,whether using QA to generate rationale."
+    )
     return parser.parse_args()
 
 
@@ -103,7 +110,7 @@ def load_t5(model_name):
 
 
 def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='train',
-                      inference_num=20 , wo_opinion_rate=0.2, step2=True):
+                      inference_num=20 , wo_opinion_rate=0.2, step2=True,qa2r = 0):
 
     dataset = load_dataset("json",data_files=os.path.join("../data","raw",
                             dataset_name,"{}.json".format(split)))[split] #['train']
@@ -152,6 +159,9 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
     large_lm,large_tokenizer = load_llama(model_name=large_lm_name)
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
     
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
     # i是当前问题的index
     while i < len(dataset):
         item = dataset[i]
@@ -220,8 +230,15 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
         else:
             golden_rationales = pre_filter_rationales
 
+        pbar.update(1)
+
         if len(golden_rationales) == 0:
-            continue
+            if not qa2r:
+                continue
+            else:
+                golden_rationales = using_qa_generate_rationale(
+                                large_lm=large_lm, tokenizer= large_tokenizer,
+                                question=question, answer=answer, generate_time=qa2r)
 
         # 存储 question(choices)+ answer+ golden rationales
         # 写入路径： ../data/processed/qasc/
@@ -242,7 +259,8 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
                   "pass_step2_count":pass_step2_count}
         fl.write(json.dumps(log_in,ensure_ascii=False))
         
-    
+        
+    pbar.close()
     for key in dataset_acc.keys():
         dataset_acc[key] /= num_items
     print(dataset_acc)
@@ -349,6 +367,8 @@ def model_download(model_name):
     tokenizer.save_pretrained(pt_save_directory) 
     model.save_pretrained(pt_save_directory)
 
+def statistic_temp_data():
+    pass
 
 
 if __name__ == "__main__":
@@ -362,9 +382,13 @@ if __name__ == "__main__":
         dir_name = args.dir_name
     else:
         dir_name = dataset_name
-        
+    
+    # TODO： qa2r 的处理可以在产生数据的过程中顺带进行，也可单独读取文件再做处理
+
+
     fillter_rationale(large_lm_name=large_lm, small_lm_name=small_lm,
                       dataset_name=dataset_name,dir_name=dir_name,step2=args.step2,
-                      inference_num=args.inference_num,wo_opinion_rate=args.wo_opinion_rate)
+                      inference_num=args.inference_num,wo_opinion_rate=args.wo_opinion_rate,
+                      qa2r=args.qa2r)
 
     generate_ft_data(dataset_name,dir_name=dir_name,use_opinion_ft=args.use_opinion_ft)

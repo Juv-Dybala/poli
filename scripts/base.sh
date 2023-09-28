@@ -4,8 +4,9 @@ python ../poli/data_process.py \
     --dataset "qasc" \
     --inference_num 20 \
     --wo_opinion_rate 0.2 \
-    --dir_name "base" \
+    --dir_name "step12" \
     --step2 \
+    # --qa2r 1\
     # --use_opinion_ft \
     # --sycophancy
     

@@ -393,10 +393,15 @@ if __name__ == "__main__":
     print(args)
     
     model_name = args.model_name
+    dataset_name = args.dataset
+    if args.dir_name is not None:
+        dir_name = args.dir_name
+    else:
+        dir_name = dataset_name
 
-    output_dir = os.path.join("../result/lora_model",model_name)
+    output_dir = os.path.join("../result/lora_model",dir_name)
     os.makedirs(output_dir,exist_ok=True)
-    output_merged_dir = os.path.join("../result/ckpt",model_name)
+    output_merged_dir = os.path.join("../result/ckpt",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
     if os.path.exists(output_merged_dir):
@@ -415,11 +420,7 @@ if __name__ == "__main__":
     print(model)
     print(model.device)
 
-    dataset_name = args.dataset
-    if args.dir_name is not None:
-        dir_name = args.dir_name
-    else:
-        dir_name = dataset_name
+
     # 测评初始或已保存模型在数据集上的表现
     # eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
     # exit()

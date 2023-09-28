@@ -165,3 +165,15 @@ def generate_answer(large_lm, tokenizer, question, num_of_choice,
     return ground_answer,voting_answer,rationales,acc,sycophancy
 
 
+def using_qa_generate_rationale(large_lm, tokenizer, question, answer, generate_time):
+    input = f"Question:{question}. The correct answer is {answer[0]+answer[1]} .\
+        Why? Please think step by step. \n Answer: "
+    reply = large_lm(
+        input,
+        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
+        top_k=10,
+        num_return_sequences=generate_time, #要返回多少个不同输出
+        eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
+        max_length=500, #生成文本最大长度
+    )
+    # TODO :处理reply，返回rationales，注意抽取出answer
