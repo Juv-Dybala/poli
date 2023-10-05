@@ -166,7 +166,8 @@ def generate_answer(large_lm, tokenizer, question, num_of_choice,
 
 
 def using_qa_generate_rationale(large_lm, tokenizer, question, answer, generate_time):
-    input = f"Question:{question}. The correct answer is {answer[0]+answer[1]} .\
+    answer_format = answer[0]+' '+answer[1]
+    input = f"Question:{question}. The correct answer is {answer_format} . \
         Why? Please think step by step. \n Answer: "
     reply = large_lm(
         input,
@@ -177,3 +178,20 @@ def using_qa_generate_rationale(large_lm, tokenizer, question, answer, generate_
         max_length=500, #生成文本最大长度
     )
     # TODO :处理reply，返回rationales，注意抽取出answer
+    rationales = []
+    for seq in reply:
+        whole_answer = seq['generated_text'].split("Answer:")[-1]
+        setences = re.split(r"[.\n]",whole_answer)
+        ex_rationale = []
+        for sentence in setences:
+            pattern_str = r"The correct answer is .*\."
+            if answer_format in sentence or re.search(pattern_str,sentence):
+                continue
+            elif sentence.isspace() or sentence == "":
+                continue
+            else:
+                ex_rationale.append(sentence)
+        rationale = ".\n".join(ex_rationale)
+        rationales.append(rationale)
+    return rationales
+        

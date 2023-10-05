@@ -236,6 +236,7 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
             if not qa2r:
                 continue
             else:
+                print(f"Using QA Generating {qa2r} rationale(s). ----------------------------------------")
                 golden_rationales = using_qa_generate_rationale(
                                 large_lm=large_lm, tokenizer= large_tokenizer,
                                 question=question, answer=answer, generate_time=qa2r)
