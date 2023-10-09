@@ -266,7 +266,7 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
     f.close()
 
 
-def generate_ft_data(dataset_name, use_opinion_ft, dir_name,sycophancy = None):
+def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy = None):
     print("Dataset:{}".format(dataset_name))
     in_dir = "../data/processed/{}.jsonl".format(dir_name)
     out_dir = "../data/finetuning/{}.jsonl".format(dir_name)
@@ -279,7 +279,7 @@ def generate_ft_data(dataset_name, use_opinion_ft, dir_name,sycophancy = None):
         num_of_rationales = len(golden_rationales)
         num_of_choice = item["Num of choice"]
 
-        if not use_opinion_ft:
+        if not use_opinion_ft: # 默认，只生成QAR
             for rationale in golden_rationales:
                 write_in = {"Question":item["Question"],
                             "Answer":item["Answer"],
@@ -406,11 +406,12 @@ def step2_selection(dir_name,small_lm_name,output):
         print("After selection,there are {} rationale(s) left.".format(len(golden_rationales)))        
         print("Temporary average passing rate is {}".format(pass_count/total))
 
-        write_in = {"Question":question,
-                    "Num of choice":num_of_choice,
-                    "Answer":answer,
-                    "Rationales":golden_rationales}
-        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        if len(golden_rationales):
+            write_in = {"Question":question,
+                        "Num of choice":num_of_choice,
+                        "Answer":answer,
+                        "Rationales":golden_rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
 
         pbar.update(1)
     
