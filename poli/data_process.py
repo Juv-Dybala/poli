@@ -6,6 +6,7 @@ import os.path
 import re
 from pre_filter import generate_answer,using_qa_generate_rationale
 from refined_selection import select_rationale
+from datasets_load import datasets_load,load_preprocessed_data
 import json
 import random
 import argparse
@@ -99,10 +100,8 @@ def load_t5(model_name):
     model_save_directory = os.path.join("../models",model_name) 
 
     tokenizer = AutoTokenizer.from_pretrained(model_save_directory)
-    if model_name in ["google/t5-small","google/flan-t5-small"]:
-        model = T5ForConditionalGeneration.from_pretrained(model_save_directory).to("cuda")
-    else:
-        model = AutoModelForCausalLM.from_pretrained(model_save_directory).to("cuda")
+    model = T5ForConditionalGeneration.from_pretrained(model_save_directory).to("cuda")
+    
     print(model)
     print("---------------------------------------")
     
@@ -112,8 +111,7 @@ def load_t5(model_name):
 def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='train',
                       inference_num=20 , wo_opinion_rate=0.2, step2=True,qa2r = 0):
 
-    dataset = load_dataset("json",data_files=os.path.join("../data","raw",
-                            dataset_name,"{}.json".format(split)))[split] #['train']
+    dataset = datasets_load(dataset_name,split)
     print(dataset)
     num_items = len(dataset)
 
@@ -347,21 +345,14 @@ def generate_ft_data(dataset_name, use_opinion_ft, dir_name,sycophancy = None):
     fout.close()
     
 
-def dataset_download(dataset_name):
-    # 下载数据集到本地
-    dataset = load_dataset(dataset_name)
-    print(dataset)
-    for split,ds in dataset.items():
-        dataset_save_directory = os.path.join("../data","raw",dataset_name,f"{split}.json")
-        ds.to_json(dataset_save_directory)
-    print("Download {} dataset successfully! ------------------------")
-
 def model_download(model_name):
     # 下载模型到本地
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    # model = T5ForConditionalGeneration.from_pretrained(model_name)
+    if "t5" in model_name:
+        model = T5ForConditionalGeneration.from_pretrained(model_name)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_name)
     print(model)
 
     pt_save_directory = os.path.join("../models",model_name) 
@@ -370,6 +361,62 @@ def model_download(model_name):
 
 def statistic_temp_data():
     pass
+
+
+def step2_selection(dir_name,small_lm_name,output):
+    
+    dataset = load_preprocessed_data(dir_name)
+    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    output_dir = "../data/processed/{}.jsonl".format(output)
+    fout = open(output_dir,mode="a+")
+
+    # TODO：泄露现象 （未提问，只根据rationale就产生了answer）
+
+    # 通过率计算
+    total = 0
+    pass_count = 0
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    print("Select golden rationales. -------------------------------------")
+
+    for item in dataset:
+
+        question = item['Question']
+        print(question)
+        answer = item['Answer']
+        num_of_choice = item['Num of choice']
+        if answer != chr(ord('A')+num_of_choice-1):
+            pattern_str = f'\({answer}\)' + '.*?\('
+            answer_text = re.search(pattern_str,question).group()[4:-2]
+        else:
+            pattern_str = f'\({answer}\).*'
+            answer_text = re.search(pattern_str,question).group()[4:]
+        answer = ["({})".format(answer),answer_text]
+        pre_filter_rationales = item['Rationales']
+
+        golden_rationales = select_rationale(model=small_lm,tokenizer=small_tokenizer,
+                            question = question,ground_answer = answer,
+                            pre_filter_rationales = pre_filter_rationales)
+        
+        total += len(pre_filter_rationales)
+        pass_count += len(golden_rationales)
+        
+        print("After selection,there are {} rationale(s) left.".format(len(golden_rationales)))        
+        print("Temporary average passing rate is {}".format(pass_count/total))
+
+        write_in = {"Question":question,
+                    "Num of choice":num_of_choice,
+                    "Answer":answer,
+                    "Rationales":golden_rationales}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+
+        pbar.update(1)
+    
+    pbar.close()
+    fout.close()
+
 
 
 if __name__ == "__main__":

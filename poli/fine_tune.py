@@ -12,6 +12,7 @@ from datasets import load_dataset
 import json
 import copy
 from inference_eval import inference_eval
+from datasets_load import datasets_load
 
 
 QUESTION_PROMPT = {
@@ -377,9 +378,7 @@ def train(model, tokenizer, dataset, log_dir,output_dir, args):
 
 def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
 
-    print("Loading data {}-{} ...".format(dataset_name,split))
-    dataset_dir = os.path.join("../data/raw",dataset_name,"{}.json".format(split))
-    eval_data = load_dataset("json",data_files=dataset_dir)['train']
+    eval_data = datasets_load(dataset_name,split)
     print(eval_data)
     
     result = inference_eval(model,tokenizer,eval_data,opinion)

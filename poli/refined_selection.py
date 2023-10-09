@@ -47,11 +47,13 @@ def select_rationale(model,tokenizer, question, ground_answer, pre_filter_ration
         
         # print(lm_answer)
         if ground_answer[0] in lm_answer or ground_answer[1].lower() in lm_answer.lower():
-            # print("{}----Answer correctly!".format(lm_answer))
+            print(rationale)
+            print("{}----Answer correctly!".format(lm_answer))
             golden_rationales.append(rationale)
             pass_or_not.append(True)
         else:
-            # print("{}----Answer wrong.".format(lm_answer))
+            print(rationale)
+            print("{}----Answer wrong.".format(lm_answer))
             pass_or_not.append(False)
         
     print(pass_or_not)
