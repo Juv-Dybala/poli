@@ -5,8 +5,8 @@ from datasets import load_dataset
 import os.path
 import re
 from pre_filter import generate_answer,using_qa_generate_rationale
-from refined_selection import select_rationale
-from datasets_load import datasets_load,load_preprocessed_data
+from refined_selection import select_rationale,statistic_las,group_by_leaked
+from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data
 import json
 import random
 import argparse
@@ -245,7 +245,7 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
         # 效果：因数据集完整跑下来耗时较长，应可以记录跑了多少，再启动时接着上次的跑
         write_in = {"Question":question,
                     "Num of choice":num_of_choice,
-                    "Answer":ground_answer,
+                    "Answer":answer,
                     "Rationales":golden_rationales}
         f.write(json.dumps(write_in, ensure_ascii=False) + "\n")
 
@@ -275,21 +275,34 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
 
     for line in fin:
         item = json.loads(line)
+        question = item['Question']
         golden_rationales = item["Rationales"]
         num_of_rationales = len(golden_rationales)
         num_of_choice = item["Num of choice"]
+        
+        answer = item['Answer']
+        # 由于生成数据的代码版本不同，对数据进行规范化
+        num_of_choice = item['Num of choice']
+        if not isinstance(answer,list):
+            if answer != chr(ord('A')+num_of_choice-1):
+                pattern_str = f'\({answer}\)' + '.*?\('
+                answer_text = re.search(pattern_str,question).group()[4:-2]
+            else:
+                pattern_str = f'\({answer}\).*'
+                answer_text = re.search(pattern_str,question).group()[4:]
+            answer = ["({})".format(answer),answer_text]
 
         if not use_opinion_ft: # 默认，只生成QAR
             for rationale in golden_rationales:
-                write_in = {"Question":item["Question"],
-                            "Answer":item["Answer"],
+                write_in = {"Question":question,
+                            "Answer":answer,
                             "Rationale":rationale}
                 fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
         elif not sycophancy:
             if num_of_choice + 1 >= num_of_rationales:
                 # w/o opinion
-                write_in = {"Question":item["Question"],
-                            "Answer":item["Answer"],
+                write_in = {"Question":question,
+                            "Answer":answer,
                             "Rationale":golden_rationales[0]}
                 fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
                 # with opinoin
@@ -299,17 +312,17 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
                         rationale = golden_rationales[i]
                     else:
                         rationale = random.choice(golden_rationales)
-                    write_in = {"Question":item["Question"],
+                    write_in = {"Question":question,
                                 "Opinion":opinion,
-                                "Answer":item["Answer"],
+                                "Answer":answer,
                                 "Rationale":rationale}
                     fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
             else:
                 generate_time = num_of_rationales // (num_of_choice+1) + 1
                 # w/o opinion
                 for t in range(generate_time):
-                    write_in = {"Question":item["Question"],
-                                "Answer":item["Answer"],
+                    write_in = {"Question":question,
+                                "Answer":answer,
                                 "Rationale":golden_rationales[t]}
                     fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
                 for i in range(1,num_of_choice+1):
@@ -319,9 +332,9 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
                             rationale = golden_rationales[generate_time*i+t]
                         else:
                             rationale = random.choice(golden_rationales)
-                        write_in = {"Question":item["Question"],
+                        write_in = {"Question":question,
                                     "Opinion":opinion,
-                                    "Answer":item["Answer"],
+                                    "Answer":answer,
                                     "Rationale":rationale}
                         fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
         else: #针对易发生谄媚的opinion生成更多的fine-tune数据，但也需要生成无意见数据
@@ -329,15 +342,15 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
             each_point_num = num_of_rationales // sum(sycophancy.values())
             # w/o opinion
             for t in range(no_opinion_point*each_point_num): 
-                write_in = {"Question":item["Question"],
-                            "Answer":item["Answer"],
+                write_in = {"Question":question,
+                            "Answer":answer,
                             "Rationale":random.choice(golden_rationales)}
                 fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
             for opinion,v in sycophancy:
                 for t in range(v*each_point_num):
-                    write_in = {"Question":item["Question"],
+                    write_in = {"Question":question,
                                 "Opinion":opinion,
-                                "Answer":item["Answer"],
+                                "Answer":answer,
                                 "Rationale":random.choice(golden_rationales)}
                     fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
     
@@ -359,8 +372,33 @@ def model_download(model_name):
     tokenizer.save_pretrained(pt_save_directory) 
     model.save_pretrained(pt_save_directory)
 
-def statistic_temp_data():
-    pass
+
+def statistic_leakage_data(eval_model_name,dir_name,grouping=True):
+    # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model
+    eval_model,tokenizer = load_t5(model_name=eval_model_name)
+    dataset = load_finetuning_data(dir_name)
+
+    # 将是否泄露分组统计
+    if grouping: 
+        leakage_rationales,no_leakage_rationales = group_by_leaked(eval_model,tokenizer,dataset)
+
+        leaked_rate = len(leakage_rationales)/len(dataset)
+        print(f"The leaked rate of dataset {dir_name} is {leaked_rate} .")
+
+        leakage_result = statistic_las(eval_model,tokenizer,leakage_rationales)
+        print("Leakage rationales performance of metrics: {}".format(leakage_result))
+
+        no_leakage_result = statistic_las(eval_model,tokenizer,no_leakage_rationales)
+        print("No leakage rationales performance of metrics: {}".format(no_leakage_result))
+
+        las = (leakage_result['LAS'] + no_leakage_result['LAS'])/2
+    else:
+        result = statistic_las(eval_model,tokenizer,dataset)
+        las = result['LAS']
+
+    print("The LAS of dataset is {} .".format(las))
+    
+
 
 
 def step2_selection(dir_name,small_lm_name,output):
@@ -369,8 +407,6 @@ def step2_selection(dir_name,small_lm_name,output):
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
     output_dir = "../data/processed/{}.jsonl".format(output)
     fout = open(output_dir,mode="a+")
-
-    # TODO：泄露现象 （未提问，只根据rationale就产生了answer）
 
     # 通过率计算
     total = 0
@@ -386,14 +422,17 @@ def step2_selection(dir_name,small_lm_name,output):
         question = item['Question']
         print(question)
         answer = item['Answer']
+        # 由于生成数据的代码版本不同，对数据进行规范化
         num_of_choice = item['Num of choice']
-        if answer != chr(ord('A')+num_of_choice-1):
-            pattern_str = f'\({answer}\)' + '.*?\('
-            answer_text = re.search(pattern_str,question).group()[4:-2]
-        else:
-            pattern_str = f'\({answer}\).*'
-            answer_text = re.search(pattern_str,question).group()[4:]
-        answer = ["({})".format(answer),answer_text]
+        if not isinstance(answer,list):
+            if answer != chr(ord('A')+num_of_choice-1):
+                pattern_str = f'\({answer}\)' + '.*?\('
+                answer_text = re.search(pattern_str,question).group()[4:-2]
+            else:
+                pattern_str = f'\({answer}\).*'
+                answer_text = re.search(pattern_str,question).group()[4:]
+            answer = ["({})".format(answer),answer_text]
+        
         pre_filter_rationales = item['Rationales']
 
         golden_rationales = select_rationale(model=small_lm,tokenizer=small_tokenizer,

@@ -4,7 +4,7 @@ from transformers import pipeline,AutoTokenizer,AutoModelForCausalLM
 import os.path
 import re
 
-
+# This file uses llama2.
 model_name = "meta-llama/Llama-2-7b-chat-hf"
 
 

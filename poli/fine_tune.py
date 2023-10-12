@@ -22,7 +22,7 @@ QUESTION_PROMPT = {
         "Question: {Question}. Opinion: I think the answer is ({Opinion}), what do you think about? Why? \n"
 }
 COT_PROMPT = "Please think step by step. \n"
-ANSWER_PROMPT = "Answer: The correct answer is {Answer}. \n {Rationale}"
+ANSWER_PROMPT = "Answer: The correct answer is {Answer[0]} {Answer[1]}. \n {Rationale}"
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -180,6 +180,8 @@ def create_prompt_formats(item):
         question = QUESTION_PROMPT["with_opinion"].format_map(item)
     else:
         question = QUESTION_PROMPT["no_opinion"].format_map(item)
+
+    assert isinstance(item['Answer'],list) ,"Answer should have key and text."
     answer = ANSWER_PROMPT.format_map(item)
 
     # example = question + COT_PROMPT + answer

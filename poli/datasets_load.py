@@ -33,10 +33,16 @@ def load_qasc(dataset_name,split='Train'):
 
 
 def load_preprocessed_data(dir_name):
-    # cols:'Question', 'Num of choice', 'Answer', 'Rationales'
+    # cols:'Question', 'Num of choice', 'Answer', 'Rationales'(list)
     dataset_dir = os.path.join("../data/processed",f"{dir_name}.jsonl")
     dataset = load_dataset('json',data_files=dataset_dir)['train']
     print(dataset)
     return dataset
 
-    
+
+def load_finetuning_data(dir_name):
+    # cols:'Question','Answer','Rationale'(,'Opinion')
+    dataset_dir = os.path.join("../data/finetuning",f"{dir_name}.jsonl")
+    dataset = load_dataset('json',data_files=dataset_dir)['train']
+    print(dataset)
+    return dataset
