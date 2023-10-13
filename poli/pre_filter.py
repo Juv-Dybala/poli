@@ -177,7 +177,7 @@ def using_qa_generate_rationale(large_lm, tokenizer, question, answer, generate_
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
         max_length=500, #生成文本最大长度
     )
-    # TODO :处理reply，返回rationales，注意抽取出answer
+    
     rationales = []
     for seq in reply:
         whole_answer = seq['generated_text'].split("Answer:")[-1]
@@ -194,4 +194,32 @@ def using_qa_generate_rationale(large_lm, tokenizer, question, answer, generate_
         rationale = ".\n".join(ex_rationale)
         rationales.append(rationale)
     return rationales
+
+
+def using_qa_generate_ar(large_lm, tokenizer, question, ground_answer, generate_time):
+    # 添加提示
+    answer_format = ground_answer[0]+' '+ground_answer[1]
+    str1,str2 = question.split(answer_format)
+    add_hint_answer = str1 + answer_format + " (CORRECT)" + str2
+    input = f"Question: {add_hint_answer}. What do you think the answer is? Why? \n" + \
+                "Please think step by step. Answer: The correct answer is"
+    print(input)
+    reply = large_lm(
+        input,
+        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
+        top_k=10,
+        num_return_sequences=generate_time, #要返回多少个不同输出
+        eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
+        max_length=500, #生成文本最大长度
+    )
+
+    rationales = []
+    for seq in reply:
+        whole_answer = seq['generated_text'].split("Answer:")[-1]
+        answer,rationale = extract_ar(whole_answer)
         
+        if answer == ground_answer[0][1]:
+            rationales.append(rationale)
+    
+    print("Generated {} rationales using QA2RA.".format(len(rationales)))
+    return rationales

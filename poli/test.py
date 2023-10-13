@@ -1,5 +1,18 @@
-from data_process import model_download,step2_selection,generate_ft_data,statistic_leakage_data
+from data_process import model_download,step2_selection,generate_ft_data,statistic_leakage_data,STaR
+from data_process import *
+from datasets_load import *
 from datasets import load_dataset,DatasetDict
+
+dataset_name = "qasc"
+large_model_name = "meta-llama/Llama-2-7b-chat-hf"
+
+format_answer("step1")
+format_answer("self_consistency1")
+
+exit()
+
+STaR(large_model_name,dataset_name)
+duplicate_hard_question_rationales(dataset_name,dir_name="../data/finetuning/hard_more.jsonl")
 
 dir_name = "self_consistency1"
 # generate_ft_data("qasc",dir_name)
@@ -9,10 +22,6 @@ print("==============================================================")
 statistic_leakage_data("google/flan-t5-large",dir_name,grouping=False)
 print("==============================================================")
 statistic_leakage_data("google/flan-t5-small",dir_name)
-
-
-exit()
-
 
 # 比较两组数据差异
 large = load_dataset("json",data_files="../data/finetuning/T5filter_large.jsonl")['train']
@@ -35,7 +44,7 @@ for item in only_base:
 
 
 # 下载模型并filter step2
-# large_model_name = "meta-llama/Llama-2-7b-chat-hf"
+
 sizes = ["small","base","large"]
 for size in sizes:
     print(f"{size} =================================================================")

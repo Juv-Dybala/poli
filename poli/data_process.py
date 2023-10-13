@@ -4,9 +4,9 @@ from transformers import pipeline,AutoTokenizer,AutoModelForCausalLM,T5ForCondit
 from datasets import load_dataset
 import os.path
 import re
-from pre_filter import generate_answer,using_qa_generate_rationale
+from pre_filter import generate_answer,using_qa_generate_rationale,using_qa_generate_ar
 from refined_selection import select_rationale,statistic_las,group_by_leaked
-from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data
+from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data,load_unprocessed_data,merge_dataset,subtract_dataset
 import json
 import random
 import argparse
@@ -74,6 +74,21 @@ def parse_args():
         help="When there is no rationale left,whether using QA to generate rationale."
     )
     return parser.parse_args()
+
+
+def model_download(model_name):
+    # 下载模型到本地
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if "t5" in model_name:
+        model = T5ForConditionalGeneration.from_pretrained(model_name)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+    print(model)
+
+    pt_save_directory = os.path.join("../models",model_name) 
+    tokenizer.save_pretrained(pt_save_directory) 
+    model.save_pretrained(pt_save_directory)
 
 
 def load_llama(model_name):
@@ -358,21 +373,6 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
     fout.close()
     
 
-def model_download(model_name):
-    # 下载模型到本地
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    if "t5" in model_name:
-        model = T5ForConditionalGeneration.from_pretrained(model_name)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(model_name)
-    print(model)
-
-    pt_save_directory = os.path.join("../models",model_name) 
-    tokenizer.save_pretrained(pt_save_directory) 
-    model.save_pretrained(pt_save_directory)
-
-
 def statistic_leakage_data(eval_model_name,dir_name,grouping=True):
     # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model
     eval_model,tokenizer = load_t5(model_name=eval_model_name)
@@ -398,8 +398,6 @@ def statistic_leakage_data(eval_model_name,dir_name,grouping=True):
 
     print("The LAS of dataset is {} .".format(las))
     
-
-
 
 def step2_selection(dir_name,small_lm_name,output):
     
@@ -456,6 +454,90 @@ def step2_selection(dir_name,small_lm_name,output):
     
     pbar.close()
     fout.close()
+
+
+def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
+    # 作为baseline，此实验在self-consistency的基础上进行
+    # 对未回答正确的，利用 Q+A（Hint）生成 A+R，并对A进行filter，A正确时对应的的R保留
+    model,tokenizer = load_llama(model_name=model_name)
+    dataset = load_unprocessed_data(dataset_name,dir_name)
+    out_dir = "../data/other/QA2RA.jsonl"
+    fout = open(out_dir,mode="a+")
+
+    pbar = tqdm(total=len(dataset))
+    pbar.set_description("STaR...")
+
+    for item in dataset:
+        
+        question = item['formatted_question']
+        answer_key = item['answerKey']
+        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
+        answer = ["({})".format(answer_key),answer_text]
+        num_of_choice = len(item['choices']['label'])
+
+        rationales = using_qa_generate_ar(model,tokenizer,question,answer,generate_time)
+        pbar.update(1)
+
+        if len(rationales) == 0:
+            continue
+    
+        write_in = {"Question":question,
+                    "Num of choice":num_of_choice,
+                    "Answer":answer,
+                    "Rationales":rationales}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")    
+    
+    pbar.close()
+    fout.close()
+
+    # 合并之前处理的数据与此次处理的数据到STaR.jsonl文件，并生成fine-tune数据
+    merge_dataset(dir1="../data/processed/self_consistency1",
+                  dir2=out_dir,merged_dir="../data/processed/STaR.jsonl")
+    generate_ft_data("qasc","STaR")
+
+
+def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
+    # 在同一数据集上，step1得到了正确回答而self-consistency未得到的问题可视为hard
+    # 对此类hard问题，在生成fine-tune数据时增大权重
+    # 直接生成fine_tune格式数据
+    # 需要注意的是，duplicate_num为1表示复制一次，即在最终数据中hard问题出现两次
+    # 这是因为最后有合并的环节，合并对象包括了easy + hard
+    print("Dataset:{}".format(dataset_name))
+
+    dir1 = "../data/processed/step12_base.jsonl"
+    dir2 = "../data/processed/self_consistency1.jsonl"
+    out_dir = "../data/other/duplicated.jsonl"
+    hard_data = subtract_dataset(dir1,dir2,filter_attribute="Question")
+
+    fout = open(out_dir,mode="a+")
+
+    duplicate_int = duplicate_num // 1
+    duplicate_frac = duplicate_num % 1
+
+    for i in range(duplicate_int):
+        for item in hard_data:
+            rationales = item['Rationales']
+            for rationale in rationales:
+                write_in = {"Question":item['Question'],
+                            "Answer":item['Answer'],
+                            "Rationale":rationale}
+                fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+    if duplicate_frac:
+        sample_num = duplicate_frac * len(hard_data)
+        for i in sample_num:
+            sampled_item = random.choice(hard_data)
+            rationales = sampled_item['Rationales']
+            for rationale in rationales:
+                write_in = {"Question":sampled_item['Question'],
+                            "Answer":sampled_item['Answer'],
+                            "Rationale":rationale}
+                fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+    
+    fout.close()
+
+    # 合并easy数据
+    merge_dataset(dir1=out_dir,dir2="../data/finetuning/step12_base.jsonl",
+                  merged_dir=dir_name)
 
 
 
