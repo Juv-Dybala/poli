@@ -491,7 +491,7 @@ def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
     fout.close()
 
     # 合并之前处理的数据与此次处理的数据到STaR.jsonl文件，并生成fine-tune数据
-    merge_dataset(dir1="../data/processed/self_consistency1",
+    merge_dataset(dir1="../data/processed/self_consistency1.jsonl",
                   dir2=out_dir,merged_dir="../data/processed/STaR.jsonl")
     generate_ft_data("qasc","STaR")
 
@@ -538,6 +538,24 @@ def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
     # 合并easy数据
     merge_dataset(dir1=out_dir,dir2="../data/finetuning/step12_base.jsonl",
                   merged_dir=dir_name)
+
+
+def sample_rationales(dir_name, sample_rate=0.5):
+    dataset = load_preprocessed_data(dir_name)
+    out_dir = f"../data/processed/{dir_name}_{sample_rate}sample.jsonl"
+    fout = open(out_dir,mode="a+")
+    for item in dataset:
+        rationales = item['Rationales']
+        sample_num = int(sample_rate * len(rationales)) if len(rationales) > 1 else 1
+        sampled = random.sample(rationales,sample_num)
+
+        write_in = {"Question":item['Question'],
+                    "Num of choice":item['Num of choice'],
+                    "Answer":item['Answer'],
+                    "Rationales":sampled}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+
+    fout.close() 
 
 
 
