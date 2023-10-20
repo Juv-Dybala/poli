@@ -4,7 +4,7 @@ from transformers import pipeline,AutoTokenizer,AutoModelForCausalLM,T5ForCondit
 from datasets import load_dataset
 import os.path
 import re
-from pre_filter import generate_answer,using_qa_generate_rationale,using_qa_generate_ar
+from pre_filter import generate_answer,using_qa_generate_rationale,using_hint_generate_ar,using_opinion_generate_ar,answer_question
 from refined_selection import select_rationale,statistic_las,group_by_leaked
 from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data,load_unprocessed_data,merge_dataset,subtract_dataset
 import json
@@ -125,7 +125,9 @@ def load_t5(model_name):
 
 def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='train',
                       inference_num=20 , wo_opinion_rate=0.2, step2=True,qa2r = 0):
-
+    # 主要在无正确答案时进行，按比例分各个模块提问次数
+    # 对每一个问题分别走流程（step1/sc -> step2 -> qa2r）
+    
     dataset = datasets_load(dataset_name,split)
     print(dataset)
     num_items = len(dataset)
@@ -399,6 +401,102 @@ def statistic_leakage_data(eval_model_name,dir_name,grouping=True):
     print("The LAS of dataset is {} .".format(las))
     
 
+def step1_generate(large_lm_name,dataset_name,inference_num):
+    # inference_num 应为包含 wo(no_opinion)、right(right_opinion)、wrong(wrong_opinion)三项的dict
+    # 数据集包含正确答案
+    # 这个函数会分类记录所有回答正确的rationale
+    dataset = datasets_load(dataset_name,'train')
+    print(dataset)
+
+    dir_name = "../data/processed/{}".format(dataset_name)
+    os.makedirs(dir_name,exist_ok=True)
+    fwo = open(os.path.join(dir_name,"step1_wo.jsonl"),mode="a+")
+    fright = open(os.path.join(dir_name,"step1_right.jsonl"),mode="a+")
+    fwrong = open(os.path.join(dir_name,"step1_wrong.jsonl"),mode="a+")
+
+    pass_count = {"wo":0,"right":0,"wrong":0}    
+
+    large_lm,tokenizer = load_llama(model_name=large_lm_name)
+    print("Generate and Prefilter rationales. ----------------------------------------")
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    for item in dataset:
+        question = item['formatted_question']
+        print("=================================================================")
+        print(f"Question: {question}")
+
+        num_of_choice = len(item['choices']['label']) #需注意不同数据集标签名不同
+        answer_key = item['answerKey']
+        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
+        answer = ["({})".format(answer_key),answer_text]
+        print(answer)
+
+        # without opinion
+        if 'wo' in inference_num:
+            wo_rationales,wo_answers = answer_question(large_lm,tokenizer,question,ground_answer=answer,
+                                            generate_time=inference_num['wo'])
+            print(wo_answers)
+            pass_count['wo'] += len(wo_rationales)
+            print("Generate {} rationales without opinion.".format(len(wo_rationales)))
+
+            if len(wo_rationales):
+                write_in = {"Question":question,
+                            "Num of choice":num_of_choice,
+                            "Answer":answer,
+                            "Rationales":wo_rationales}
+                fwo.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        
+        # true opinion
+        if 'right' in inference_num:
+            right_rationales,right_answers = using_opinion_generate_ar(large_lm,tokenizer,question,opinion_choice=answer[0],
+                                                        ground_answer=answer,generate_time=inference_num['right'])
+            print(right_answers)
+            pass_count['right'] += len(right_rationales)
+            print("Generate {} rationales using right opinion.".format(len(right_rationales)))
+
+            if len(right_rationales):
+                write_in = {"Question":question,
+                            "Num of choice":num_of_choice,
+                            "Answer":answer,
+                            "Rationales":right_rationales}
+                fright.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        
+        # wrong opinion
+        if 'wrong' in inference_num:
+            wrong_rationales = []
+            wrong_answers = []
+            generate_time = inference_num['wrong'] // (num_of_choice-1)
+            for i in range(num_of_choice):
+                opinion_choice = chr(ord('A') + i)
+                if opinion_choice == answer[0][1]:
+                    continue
+                rationales,answer_list = using_opinion_generate_ar(large_lm,tokenizer,question,opinion_choice=f"({opinion_choice})",
+                                                       ground_answer=answer,generate_time=generate_time)
+                wrong_rationales += rationales
+                wrong_answers += answer_list
+            print(wrong_answers)
+            pass_count['wrong'] += len(wrong_rationales)
+            print("Generate {} rationales using wrong opinion.".format(len(wrong_rationales)))
+
+            if len(wrong_rationales):
+                write_in = {"Question":question,
+                            "Num of choice":num_of_choice,
+                            "Answer":answer,
+                            "Rationales":wrong_rationales}
+                fwrong.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        
+        pbar.update(1)
+    
+    pbar.close()
+    fwo.close()
+    fright.close()
+    fwrong.close()
+
+    print(pass_count)
+    
+
 def step2_selection(dir_name,small_lm_name,output):
     
     dataset = load_preprocessed_data(dir_name)
@@ -475,7 +573,7 @@ def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
         answer = ["({})".format(answer_key),answer_text]
         num_of_choice = len(item['choices']['label'])
 
-        rationales = using_qa_generate_ar(model,tokenizer,question,answer,generate_time)
+        rationales = using_hint_generate_ar(model,tokenizer,question,answer,generate_time)
         pbar.update(1)
 
         if len(rationales) == 0:
@@ -570,8 +668,6 @@ if __name__ == "__main__":
         dir_name = args.dir_name
     else:
         dir_name = dataset_name
-    
-    # TODO： qa2r 的处理可以在产生数据的过程中顺带进行，也可单独读取文件再做处理
 
 
     fillter_rationale(large_lm_name=large_lm, small_lm_name=small_lm,

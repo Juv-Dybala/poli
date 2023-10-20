@@ -5,12 +5,27 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-
-format_answer("step1")
-format_answer("self_consistency1")
+inference_num = {'wo':10,'right':10,'wrong':14}
+step1_generate(large_model_name,dataset_name,inference_num)
 
 exit()
 
+
+
+merge_dataset(dir1="../data/processed/STaR_0.5sample.jsonl",
+            dir2="../data/other/step1_notIn_star.jsonl",
+            merged_dir="../data/processed/star+step1.jsonl")
+
+generate_ft_data("qasc","star+step1")
+subtract_dataset(dir1="../data/processed/step1.jsonl",
+                 dir2="../data/processed/STaR.jsonl",
+                 filter_attribute="Question",
+                 subtracted_dir="../data/other/step1_notIn_star.jsonl")
+sample_rationales("STaR")
+
+
+# format_answer("step1")
+# format_answer("self_consistency1")
 STaR(large_model_name,dataset_name)
 duplicate_hard_question_rationales(dataset_name,dir_name="../data/finetuning/hard_more.jsonl")
 
