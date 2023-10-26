@@ -5,10 +5,20 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-inference_num = {'wo':10,'right':10,'wrong':14}
+inference_num = {'wo':6,'right':7,'wrong':7}
 step1_generate(large_model_name,dataset_name,inference_num)
 
 exit()
+
+# dataset_name = "ai2_arc"
+# datasets_load(dataset_name,'ARC-Easy')
+# generate_ft_data("qasc","step1_wrong")
+wo_dir = "../data/processed/qasc/step1_wo.jsonl"
+right_dir = "../data/processed/qasc/step1_right.jsonl"
+wrong_dir = "../data/processed/qasc/step1_wrong.jsonl"
+
+wo_right = "../data/processed/qasc/intsec_wo&right.jsonl"
+intersect_dataset(dir1=right_dir,dir2=wrong_dir,filter_attribute="Question")
 
 
 
@@ -16,7 +26,7 @@ merge_dataset(dir1="../data/processed/STaR_0.5sample.jsonl",
             dir2="../data/other/step1_notIn_star.jsonl",
             merged_dir="../data/processed/star+step1.jsonl")
 
-generate_ft_data("qasc","star+step1")
+
 subtract_dataset(dir1="../data/processed/step1.jsonl",
                  dir2="../data/processed/STaR.jsonl",
                  filter_attribute="Question",

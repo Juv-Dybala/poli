@@ -121,9 +121,9 @@ def parse_args():
 
 class QADataset(Dataset):
     
-    def __init__(self,dataset_name,tokenizer,max_words=512):
+    def __init__(self,dataset_name,dir_name,tokenizer,max_words=512):
         self.dataset_name = dataset_name
-        self.dataset_dir = "../data/finetuning/{}.jsonl".format(dataset_name)
+        self.dataset_dir = os.path.join("../data/finetuning",dataset_name,"{}.jsonl".format(dir_name))
         self.datas = self.load_data(self.dataset_dir)
         self.tokenizer = tokenizer
         self.max_words = max_words
@@ -210,7 +210,8 @@ def preprocess_dataset(dataset_name, dir_name, tokenizer, max_length, seed):
     # Load data
     print("Loading dataset:{}...".format(dataset_name))
 
-    dataset_dir = "../data/finetuning/{}.jsonl".format(dir_name)
+    # dataset_dir = "../data/finetuning/{}.jsonl".format(dir_name)
+    dataset_dir = os.path.join("../data/finetuning",dataset_name,"{}.jsonl".format(dir_name))
     datas = load_dataset('json',data_files=dataset_dir)
     
     # Add prompt to each sample
@@ -380,7 +381,7 @@ def train(model, tokenizer, dataset, log_dir,output_dir, args):
 
 def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
 
-    eval_data = datasets_load(dataset_name,split)
+    eval_data = datasets_load(dataset_name,split=split)
     print(eval_data)
     
     result = inference_eval(model,tokenizer,eval_data,opinion)

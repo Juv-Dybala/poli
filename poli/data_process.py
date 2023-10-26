@@ -128,7 +128,7 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
     # 主要在无正确答案时进行，按比例分各个模块提问次数
     # 对每一个问题分别走流程（step1/sc -> step2 -> qa2r）
     
-    dataset = datasets_load(dataset_name,split)
+    dataset = datasets_load(dataset_name,split=split)
     print(dataset)
     num_items = len(dataset)
 
@@ -142,7 +142,7 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
     Answer: The correct answer is
     '''
     
-    log_save_directory = os.path.join("../log","{}.json".format(dir_name))
+    log_save_directory = os.path.join("../log",dataset_name,"{}.json".format(dir_name))
     
     dataset_acc = {"wo":0,"right":0,"wrong":0}
     vote_count = 0  # 判断投票得出的结果与数据集提供答案的一致性 
@@ -162,7 +162,7 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
     else:
         fl = open(log_save_directory,mode="w")
 
-    processed_data_save_directory = os.path.join("../data","processed","{}.jsonl".format(dir_name))
+    processed_data_save_directory = os.path.join("../data","processed",dataset_name,"{}.jsonl".format(dir_name))
     
     if os.path.exists(processed_data_save_directory):
         i = len(open(processed_data_save_directory).readlines())
@@ -285,8 +285,10 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
 
 def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy = None):
     print("Dataset:{}".format(dataset_name))
-    in_dir = "../data/processed/{}.jsonl".format(dir_name)
-    out_dir = "../data/finetuning/{}.jsonl".format(dir_name)
+    os.makedirs("../data/finetuning/{}".format(dataset_name),exist_ok=True)
+
+    in_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(dir_name))
+    out_dir = os.path.join("../data/finetuning",dataset_name,"{}.jsonl".format(dir_name))
     fin = open(in_dir,mode="r+")
     fout = open(out_dir,mode="w+")
 
@@ -375,17 +377,17 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
     fout.close()
     
 
-def statistic_leakage_data(eval_model_name,dir_name,grouping=True):
+def statistic_leakage_data(eval_model_name,dataset_name,dir_name,grouping=True):
     # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model
     eval_model,tokenizer = load_t5(model_name=eval_model_name)
-    dataset = load_finetuning_data(dir_name)
+    dataset = load_finetuning_data(dataset_name,dir_name)
 
     # 将是否泄露分组统计
     if grouping: 
         leakage_rationales,no_leakage_rationales = group_by_leaked(eval_model,tokenizer,dataset)
 
         leaked_rate = len(leakage_rationales)/len(dataset)
-        print(f"The leaked rate of dataset {dir_name} is {leaked_rate} .")
+        print(f"The leaked rate of dataset {dataset_name}({dir_name}) is {leaked_rate} .")
 
         leakage_result = statistic_las(eval_model,tokenizer,leakage_rationales)
         print("Leakage rationales performance of metrics: {}".format(leakage_result))
@@ -405,14 +407,17 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
     # inference_num 应为包含 wo(no_opinion)、right(right_opinion)、wrong(wrong_opinion)三项的dict
     # 数据集包含正确答案
     # 这个函数会分类记录所有回答正确的rationale
-    dataset = datasets_load(dataset_name,'train')
+    dataset = datasets_load(dataset_name,split='train')
     print(dataset)
 
     dir_name = "../data/processed/{}".format(dataset_name)
     os.makedirs(dir_name,exist_ok=True)
-    fwo = open(os.path.join(dir_name,"step1_wo.jsonl"),mode="a+")
-    fright = open(os.path.join(dir_name,"step1_right.jsonl"),mode="a+")
-    fwrong = open(os.path.join(dir_name,"step1_wrong.jsonl"),mode="a+")
+    if 'wo' in inference_num:
+        fwo = open(os.path.join(dir_name,f"step1_wo{inference_num['wo']}.jsonl"),mode="a+")
+    if 'right' in inference_num:
+        fright = open(os.path.join(dir_name,f"step1_right{inference_num['right']}.jsonl"),mode="a+")
+    if 'wrong' in inference_num:
+        fwrong = open(os.path.join(dir_name,f"step1_wrong{inference_num['wrong']}.jsonl"),mode="a+")
 
     pass_count = {"wo":0,"right":0,"wrong":0}    
 
@@ -472,7 +477,7 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
                 opinion_choice = chr(ord('A') + i)
                 if opinion_choice == answer[0][1]:
                     continue
-                rationales,answer_list = using_opinion_generate_ar(large_lm,tokenizer,question,opinion_choice=f"({opinion_choice})",
+                rationales,answer_list = using_opinion_generate_ar(large_lm,tokenizer,question,opinion_choice=opinion_choice,
                                                        ground_answer=answer,generate_time=generate_time)
                 wrong_rationales += rationales
                 wrong_answers += answer_list
@@ -497,11 +502,11 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
     print(pass_count)
     
 
-def step2_selection(dir_name,small_lm_name,output):
+def step2_selection(dataset_name,dir_name,small_lm_name,output):
     
-    dataset = load_preprocessed_data(dir_name)
+    dataset = load_preprocessed_data(dataset_name,dir_name)
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
-    output_dir = "../data/processed/{}.jsonl".format(output)
+    output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
     fout = open(output_dir,mode="a+")
 
     # 通过率计算
@@ -559,7 +564,7 @@ def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
     # 对未回答正确的，利用 Q+A（Hint）生成 A+R，并对A进行filter，A正确时对应的的R保留
     model,tokenizer = load_llama(model_name=model_name)
     dataset = load_unprocessed_data(dataset_name,dir_name)
-    out_dir = "../data/other/QA2RA.jsonl"
+    out_dir = "../data/other/{}_QA2RA.jsonl".format(dataset_name)
     fout = open(out_dir,mode="a+")
 
     pbar = tqdm(total=len(dataset))
@@ -602,9 +607,11 @@ def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
     # 这是因为最后有合并的环节，合并对象包括了easy + hard
     print("Dataset:{}".format(dataset_name))
 
-    dir1 = "../data/processed/step12_base.jsonl"
-    dir2 = "../data/processed/self_consistency1.jsonl"
-    out_dir = "../data/other/duplicated.jsonl"
+    # dir1 = "../data/processed/step12_base.jsonl"
+    dir1 = os.path.join("../data/processed",dataset_name,"step12_base.jsonl")
+    # dir2 = "../data/processed/self_consistency1.jsonl"
+    dir2 = os.path.join("../data/processed",dataset_name,"self_consistency1.jsonl")
+    out_dir = "../data/other/{}_duplicated.jsonl".format(dataset_name)
     hard_data = subtract_dataset(dir1,dir2,filter_attribute="Question")
 
     fout = open(out_dir,mode="a+")
@@ -634,13 +641,13 @@ def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
     fout.close()
 
     # 合并easy数据
-    merge_dataset(dir1=out_dir,dir2="../data/finetuning/step12_base.jsonl",
+    merge_dataset(dir1=out_dir,dir2=os.path.join("../data/finetuning/",dataset_name,"step12_base.jsonl"),
                   merged_dir=dir_name)
 
 
-def sample_rationales(dir_name, sample_rate=0.5):
-    dataset = load_preprocessed_data(dir_name)
-    out_dir = f"../data/processed/{dir_name}_{sample_rate}sample.jsonl"
+def sample_rationales(dataset_name, dir_name, sample_rate=0.5):
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    out_dir = os.path.join("../data/processed",dataset_name,f"{dir_name}_{sample_rate}sample.jsonl")
     fout = open(out_dir,mode="a+")
     for item in dataset:
         rationales = item['Rationales']
@@ -667,7 +674,7 @@ if __name__ == "__main__":
     if args.dir_name is not None:
         dir_name = args.dir_name
     else:
-        dir_name = dataset_name
+        dir_name = dataset_name + "simple"
 
 
     fillter_rationale(large_lm_name=large_lm, small_lm_name=small_lm,
