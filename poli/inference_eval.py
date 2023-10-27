@@ -47,8 +47,10 @@ def inference_eval(model,tokenizer,eval_data,opinion = False):
                         COT_PROMPT + "Answer: The correct answer is"
             for item in eval_data:
                 input = INPUT_PROMPT.format(item['formatted_question'])
-                reply = lm(input,do_sample=True, top_k=10,num_return_sequences=1, 
-                        eos_token_id=tokenizer.eos_token_id,max_length=500)[0]['generated_text']
+                # 用Greedy decoding
+                # reply = lm(input,do_sample=True, top_k=10,num_return_sequences=1, 
+                #         eos_token_id=tokenizer.eos_token_id,max_length=500)[0]['generated_text']
+                reply = lm(input,do_sample=False, eos_token_id=tokenizer.eos_token_id)[0]['generated_text']
                 print("===============================")
                 print(reply)
                 answer_key = item['answerKey']

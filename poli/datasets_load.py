@@ -115,6 +115,14 @@ def load_finetuning_data(dataset_name,dir_name):
     return dataset
 
 
+def load_ppo_data(dataset_name,dir_name):
+    # cols:'Query','Response','Reward'
+    dataset_dir = os.path.join("../data/ppo",dataset_name,f"{dir_name}.jsonl")
+    dataset = load_dataset('json',data_files=dataset_dir)['train']
+    print(dataset)
+    return dataset
+
+
 def load_unprocessed_data(dataset_name,dir_name):
     # 对于某数据集，提取出未经处理的（被筛掉而未进入下一步）的剩余数据
     # 主要用于STaR

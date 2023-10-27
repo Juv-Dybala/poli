@@ -442,6 +442,7 @@ if __name__ == "__main__":
 
     print("Merging LoRA and Saving model...")
     model = AutoPeftModelForCausalLM.from_pretrained(output_dir, device_map="auto", torch_dtype=torch.bfloat16)
+    # 此处输入的是PEFT model的dir，base model的地址在dir内的config中记录了
     print(model)
     model = model.merge_and_unload() # 将PEFT模型的参数合并到基础模型中，并释放PEFT模型的内存空间
     model.save_pretrained(output_merged_dir, safe_serialization=True)

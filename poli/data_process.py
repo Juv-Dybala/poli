@@ -5,7 +5,7 @@ from datasets import load_dataset
 import os.path
 import re
 from pre_filter import generate_answer,using_qa_generate_rationale,using_hint_generate_ar,using_opinion_generate_ar,answer_question
-from refined_selection import select_rationale,statistic_las,group_by_leaked
+from refined_selection import select_rationale,statistic_las,group_by_leaked,get_rationale_reward
 from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data,load_unprocessed_data,merge_dataset,subtract_dataset
 import json
 import random
@@ -377,6 +377,44 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
     fout.close()
     
 
+def generate_ppo_data(dataset_name, dir_name, reward_model_name):
+    # 利用小模型为rationale打分
+    # 输出到 data/.../ppo 文件夹中， 包含属性['query','response','reward']
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    out_dir = os.path.join("../data/ppo",dataset_name)
+    os.makedirs(out_dir,exist_ok=True)
+    fout = open(os.path.join(out_dir,f"{out_dir}.jsonl"),mode="a+")
+
+    pbar = tqdm(total= len(dataset))
+    pbar.set_description("Generate ppo data...")
+
+    reward_model,tokenizer = load_t5(reward_model_name)
+
+    QUERY_PROMPT = "Question: {Question}. What do you think the answer is? Why? \n Answer:"
+    RESPONSE_PROMPT = "The correct answer is {Answer}. \n {Rationale}"
+
+    for item in dataset:
+        question = item['Question']
+        answer = item['Answer']
+        rationales = item['Rationales']
+
+        for rationale in rationales:
+
+            query = QUERY_PROMPT.format_map({'Question':question})
+            response = RESPONSE_PROMPT.format_map({'Answer':" ".join(answer),'Rationale':rationale})
+            reward = get_rationale_reward(reward_model,tokenizer,question,answer,rationale)
+
+            write_in = {"query":query,
+                        "response":response,
+                        "Reward":reward}
+            fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+
+        pbar.update(1)
+    
+    pbar.close()
+    fout.close()
+
+
 def statistic_leakage_data(eval_model_name,dataset_name,dir_name,grouping=True):
     # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model
     eval_model,tokenizer = load_t5(model_name=eval_model_name)
@@ -559,45 +597,13 @@ def step2_selection(dataset_name,dir_name,small_lm_name,output):
     fout.close()
 
 
-def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
-    # 作为baseline，此实验在self-consistency的基础上进行
-    # 对未回答正确的，利用 Q+A（Hint）生成 A+R，并对A进行filter，A正确时对应的的R保留
-    model,tokenizer = load_llama(model_name=model_name)
-    dataset = load_unprocessed_data(dataset_name,dir_name)
-    out_dir = "../data/other/{}_QA2RA.jsonl".format(dataset_name)
-    fout = open(out_dir,mode="a+")
-
-    pbar = tqdm(total=len(dataset))
-    pbar.set_description("STaR...")
-
-    for item in dataset:
-        
-        question = item['formatted_question']
-        answer_key = item['answerKey']
-        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
-        answer = ["({})".format(answer_key),answer_text]
-        num_of_choice = len(item['choices']['label'])
-
-        rationales = using_hint_generate_ar(model,tokenizer,question,answer,generate_time)
-        pbar.update(1)
-
-        if len(rationales) == 0:
-            continue
+def set_question_difficulty_level(dataset_name,loop_count):
+    # TODO：对问题进行难度评级，输出到 data/.../loop_{loop_count}文件中，相比raw文件多一个难度的属性
+    # easy: 上一轮中without opinoin即回答正确的问题
+    # hard: 上一轮中提供right opinion才回答正确的问题
+    # very hard： 上一轮中均没有回答正确的问题
+    pass
     
-        write_in = {"Question":question,
-                    "Num of choice":num_of_choice,
-                    "Answer":answer,
-                    "Rationales":rationales}
-        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")    
-    
-    pbar.close()
-    fout.close()
-
-    # 合并之前处理的数据与此次处理的数据到STaR.jsonl文件，并生成fine-tune数据
-    merge_dataset(dir1="../data/processed/self_consistency1.jsonl",
-                  dir2=out_dir,merged_dir="../data/processed/STaR.jsonl")
-    generate_ft_data("qasc","STaR")
-
 
 def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
     # 在同一数据集上，step1得到了正确回答而self-consistency未得到的问题可视为hard
@@ -645,14 +651,62 @@ def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
                   merged_dir=dir_name)
 
 
+def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
+    # 作为baseline，此实验在self-consistency的基础上进行
+    # 对未回答正确的，利用 Q+A（Hint）生成 A+R，并对A进行filter，A正确时对应的的R保留
+    model,tokenizer = load_llama(model_name=model_name)
+    dataset = load_unprocessed_data(dataset_name,dir_name)
+    out_dir = "../data/other/{}_QA2RA.jsonl".format(dataset_name)
+    fout = open(out_dir,mode="a+")
+
+    pbar = tqdm(total=len(dataset))
+    pbar.set_description("STaR...")
+
+    for item in dataset:
+        
+        question = item['formatted_question']
+        answer_key = item['answerKey']
+        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
+        answer = ["({})".format(answer_key),answer_text]
+        num_of_choice = len(item['choices']['label'])
+
+        rationales = using_hint_generate_ar(model,tokenizer,question,answer,generate_time)
+        pbar.update(1)
+
+        if len(rationales) == 0:
+            continue
+    
+        write_in = {"Question":question,
+                    "Num of choice":num_of_choice,
+                    "Answer":answer,
+                    "Rationales":rationales}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")    
+    
+    pbar.close()
+    fout.close()
+
+    # 合并之前处理的数据与此次处理的数据到STaR.jsonl文件，并生成fine-tune数据
+    merge_dataset(dir1="../data/processed/self_consistency1.jsonl",
+                  dir2=out_dir,merged_dir="../data/processed/STaR.jsonl")
+    generate_ft_data("qasc","STaR")
+
+
 def sample_rationales(dataset_name, dir_name, sample_rate=0.5):
     dataset = load_preprocessed_data(dataset_name,dir_name)
     out_dir = os.path.join("../data/processed",dataset_name,f"{dir_name}_{sample_rate}sample.jsonl")
     fout = open(out_dir,mode="a+")
     for item in dataset:
         rationales = item['Rationales']
-        sample_num = int(sample_rate * len(rationales)) if len(rationales) > 1 else 1
-        sampled = random.sample(rationales,sample_num)
+
+        # sample_num = int(sample_rate * len(rationales)) if len(rationales) > 1 else 1
+        # sampled = random.sample(rationales,sample_num)
+        sampled = []
+        for rationale in rationales:
+            if random.random() < sample_rate:
+                sampled.append(rationale)
+
+        if len(sampled) == 0:
+            continue
 
         write_in = {"Question":item['Question'],
                     "Num of choice":item['Num of choice'],
