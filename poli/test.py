@@ -5,18 +5,45 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-inference_num = {'wo':6,'right':7,'wrong':7}
-step1_generate(large_model_name,dataset_name,inference_num)
+
+sizes = ["small","base","large"]
+for size in sizes:
+    print(f"{size} =================================================================")
+    small_model_name = f"google/flan-t5-{size}"
+    step2_selection(dataset_name,"step1_wo_0.6sample",small_model_name,f"step12_wo6_{size}")
+    step2_selection(dataset_name,"step1_right_0.7sample",small_model_name,f"step12_right7_{size}")
+    step2_selection(dataset_name,"step1_wrong_0.5sample",small_model_name,f"step12_wrong7_{size}")
 
 exit()
+count_reward = {-1:0, 0:0, 1:0, 2:0}
+dataset = load_ppo_data(dataset_name,"step1_wo6")
+
+for item in dataset:
+    count_reward[item['Reward']] += 1
+
+print(count_reward)
+
+# inference_num = {'wo':6,'right':7,'wrong':7}
+# step1_generate(large_model_name,dataset_name,inference_num)
+wo_dir = "../data/finetuning/qasc/step1_wo_0.6sample.jsonl"
+right_dir = "../data/finetuning/qasc/step1_right_0.7sample.jsonl"
+wrong_dir = "../data/finetuning/qasc/step1_wrong_0.5sample.jsonl"
+
+# generate_ft_data(dataset_name,dir_name="step1_wrong_0.5sample")
+
+merge_dataset(dir1=wo_dir,dir2=right_dir,merged_dir="../data/finetuning/qasc/wo6+right7.jsonl")
+
+merge_dataset(dir1="../data/finetuning/qasc/wo6+right7.jsonl",dir2=wrong_dir,
+              merged_dir="../data/finetuning/qasc/union677.jsonl")
+
 
 # dataset_name = "ai2_arc"
 # datasets_load(dataset_name,'ARC-Easy')
 # generate_ft_data("qasc","step1_wrong")
-wo_dir = "../data/processed/qasc/step1_wo.jsonl"
-right_dir = "../data/processed/qasc/step1_right.jsonl"
-wrong_dir = "../data/processed/qasc/step1_wrong.jsonl"
 
+# sample_rationales(dataset_name,"step1_wo",0.6)
+# sample_rationales(dataset_name,"step1_right",0.7)
+# sample_rationales(dataset_name,"step1_wrong",0.5)
 wo_right = "../data/processed/qasc/intsec_wo&right.jsonl"
 intersect_dataset(dir1=right_dir,dir2=wrong_dir,filter_attribute="Question")
 

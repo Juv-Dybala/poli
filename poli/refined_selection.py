@@ -173,11 +173,11 @@ def group_by_leaked(eval_model,tokenizer,dataset):
     return leakage_rationales,no_leakage_rationales
     
 
-def get_rationale_reward(reward_model,tokenizer,question,true_answer,rationale):
+def get_rationale_type(reward_model,tokenizer,question,true_answer,rationale):
     
     q2a_input = Q2A_PROMPT.format_map({'Question':question})
     q2a_answer = ask_lm(q2a_input,reward_model,tokenizer)
-    print(q2a_answer)
+    print(q2a_answer,end=" ")
     q2a = judge_answer(q2a_answer,true_answer)
         
     qr2a_input = QR2A_PROMPT.format_map({'Question':question,'Rationale':rationale})
@@ -186,9 +186,9 @@ def get_rationale_reward(reward_model,tokenizer,question,true_answer,rationale):
     qr2a = judge_answer(qr2a_answer,true_answer)
 
     if qr2a:
-        reward = 2 if not q2a else 1
+        rationale_type = 2 if not q2a else 1
     else:
-        reward = 0 if not q2a else -1
+        rationale_type = 0 if not q2a else -1
     
-    return reward
+    return rationale_type
 

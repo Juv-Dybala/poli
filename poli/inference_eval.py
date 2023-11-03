@@ -36,6 +36,7 @@ def inference_eval(model,tokenizer,eval_data,opinion = False):
                                model=model,
                                tokenizer=tokenizer)
     print(lm.device)
+    
 
     with tqdm(total=num_of_question) as pbar:
         pbar.set_description("Evaluating...")
