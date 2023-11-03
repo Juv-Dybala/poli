@@ -30,6 +30,8 @@ def ask_lm(input,model,tokenizer):
 
 def judge_answer(reply,true_answer):
     # true answer的格式应为 ['(key)','text']
+    if len(reply) == 1:
+        return true_answer[0][1] == reply
     return true_answer[0] in reply or true_answer[1].lower() in reply.lower()
 
 

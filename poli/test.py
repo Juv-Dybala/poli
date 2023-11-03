@@ -5,8 +5,9 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-inference_num = {'wo':6,'right':7,'wrong':7}
-step1_generate(large_model_name,dataset_name,inference_num)
+# inference_num = {'wo':6,'right':7,'wrong':7}
+# step1_generate(large_model_name,dataset_name,inference_num)
+generate_ft_data(dataset_name,"step1_wrong7")
 
 exit()
 
