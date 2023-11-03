@@ -115,6 +115,14 @@ def load_finetuning_data(dataset_name,dir_name):
     return dataset
 
 
+def load_ppo_data(dataset_name,dir_name):
+    # cols:'Query','Response','Reward'
+    dataset_dir = os.path.join("../data/ppo",dataset_name,f"{dir_name}.jsonl")
+    dataset = load_dataset('json',data_files=dataset_dir)['train']
+    print(dataset)
+    return dataset
+
+
 def load_unprocessed_data(dataset_name,dir_name):
     # 对于某数据集，提取出未经处理的（被筛掉而未进入下一步）的剩余数据
     # 主要用于STaR
@@ -132,12 +140,14 @@ def load_unprocessed_data(dataset_name,dir_name):
     return unprocessed_data
 
 
-def merge_dataset(dir1,dir2,merged_dir=None):
+def merge_dataset(dir_list,merged_dir=None):
     # 合并数据集
-    dataset1 = load_dataset('json',data_files=dir1)['train']
-    dataset2 = load_dataset('json',data_files=dir2)['train']
+    dataset_list = []
+    for dir in dir_list:
+        dataset = load_dataset('json',data_files=dir)['train']
+        dataset_list.append(dataset)
     # 合并前注意对各属性格式进行统一，尤其Answer
-    merged_data = concatenate_datasets([dataset1,dataset2])
+    merged_data = concatenate_datasets(dataset_list)
     print(merged_data)
     if merged_dir:
         merged_data.to_json(merged_dir)

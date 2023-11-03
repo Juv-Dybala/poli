@@ -5,7 +5,7 @@ from datasets import load_dataset
 import os.path
 import re
 from pre_filter import generate_answer,using_qa_generate_rationale,using_hint_generate_ar,using_opinion_generate_ar,answer_question
-from refined_selection import select_rationale,statistic_las,group_by_leaked
+from refined_selection import select_rationale,statistic_las,group_by_leaked,get_rationale_type
 from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data,load_unprocessed_data,merge_dataset,subtract_dataset
 import json
 import random
@@ -377,30 +377,48 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
     fout.close()
     
 
-def statistic_leakage_data(eval_model_name,dataset_name,dir_name,grouping=True):
-    # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model
-    eval_model,tokenizer = load_t5(model_name=eval_model_name)
-    dataset = load_finetuning_data(dataset_name,dir_name)
+def generate_ppo_data(dataset_name, dir_name, reward_model_name):
+    # 利用小模型为rationale打分
+    # 输出到 data/.../ppo 文件夹中， 包含属性['query','response','reward']
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    out_dir = os.path.join("../data/ppo",dataset_name)
+    os.makedirs(out_dir,exist_ok=True)
+    fout = open(os.path.join(out_dir,f"{dir_name}.jsonl"),mode="a+")
 
-    # 将是否泄露分组统计
-    if grouping: 
-        leakage_rationales,no_leakage_rationales = group_by_leaked(eval_model,tokenizer,dataset)
+    pbar = tqdm(total= len(dataset))
+    pbar.set_description("Generate ppo data...")
 
-        leaked_rate = len(leakage_rationales)/len(dataset)
-        print(f"The leaked rate of dataset {dataset_name}({dir_name}) is {leaked_rate} .")
+    reward_model,tokenizer = load_t5(reward_model_name)
 
-        leakage_result = statistic_las(eval_model,tokenizer,leakage_rationales)
-        print("Leakage rationales performance of metrics: {}".format(leakage_result))
+    count_reward = {-1:0, 0:0, 1:0, 2:0}
 
-        no_leakage_result = statistic_las(eval_model,tokenizer,no_leakage_rationales)
-        print("No leakage rationales performance of metrics: {}".format(no_leakage_result))
+    QUERY_PROMPT = "Question: {Question}. What do you think the answer is? Why? \n Answer:"
+    RESPONSE_PROMPT = "The correct answer is {Answer}. \n {Rationale}"
 
-        las = (leakage_result['LAS'] + no_leakage_result['LAS'])/2
-    else:
-        result = statistic_las(eval_model,tokenizer,dataset)
-        las = result['LAS']
+    for item in dataset:
+        question = item['Question']
+        answer = item['Answer']
+        rationales = item['Rationales']
+        print("--------------------------------")
+        print(answer)
 
-    print("The LAS of dataset is {} .".format(las))
+        for rationale in rationales:
+
+            query = QUERY_PROMPT.format_map({'Question':question})
+            response = RESPONSE_PROMPT.format_map({'Answer':" ".join(answer),'Rationale':rationale})
+            reward = get_rationale_type(reward_model,tokenizer,question,answer,rationale)
+
+            count_reward[reward] += 1
+            write_in = {"query":query,
+                        "response":response,
+                        "Reward":reward}
+            fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+
+        pbar.update(1)
+    
+    pbar.close()
+    fout.close()
+    print(count_reward)
     
 
 def step1_generate(large_lm_name,dataset_name,inference_num):
@@ -502,11 +520,11 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
     print(pass_count)
     
 
-def step2_selection(dataset_name,dir_name,small_lm_name,output):
-    
+def step2_selection_simple(dataset_name,dir_name,small_lm_name,output):
+    # QR->A的即通过filter
     dataset = load_preprocessed_data(dataset_name,dir_name)
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
-    output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
+    output_dir = os.path.join("../data/processed",dataset_name,"{}_simpleStep2.jsonl".format(output))
     fout = open(output_dir,mode="a+")
 
     # 通过率计算
@@ -559,45 +577,99 @@ def step2_selection(dataset_name,dir_name,small_lm_name,output):
     fout.close()
 
 
-def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
-    # 作为baseline，此实验在self-consistency的基础上进行
-    # 对未回答正确的，利用 Q+A（Hint）生成 A+R，并对A进行filter，A正确时对应的的R保留
-    model,tokenizer = load_llama(model_name=model_name)
-    dataset = load_unprocessed_data(dataset_name,dir_name)
-    out_dir = "../data/other/{}_QA2RA.jsonl".format(dataset_name)
-    fout = open(out_dir,mode="a+")
+def step2_selection(dataset_name,dir_name,small_lm_name,output,duplicate_num=2):
+    # Q->A且QR->A的保留, Q->WA但QR->A的增加权重（默认翻倍）, Q->A但QR->WA的筛去
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
+    fout = open(output_dir,mode="a+")
 
-    pbar = tqdm(total=len(dataset))
-    pbar.set_description("STaR...")
+    # 通过率计算
+    total = 0
+    type_count = {-1:0, 0:0, 1:0, 2:0}
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    print("Select golden rationales. -------------------------------------")
 
     for item in dataset:
+
+        question = item['Question']
+        print(question)
+        answer = item['Answer']
+        print(answer)
+        assert isinstance(answer,list),"The type of answer should be list."
         
-        question = item['formatted_question']
-        answer_key = item['answerKey']
-        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
-        answer = ["({})".format(answer_key),answer_text]
-        num_of_choice = len(item['choices']['label'])
+        pre_filter_rationales = item['Rationales']
+        total += len(pre_filter_rationales)
+        golden_rationales = []
 
-        rationales = using_hint_generate_ar(model,tokenizer,question,answer,generate_time)
+        for rationale in pre_filter_rationales:
+
+            rationale_type = get_rationale_type(small_lm,small_tokenizer,question,answer,rationale)
+            print(rationale_type,end=" ")
+            type_count[rationale_type] += 1
+
+            if rationale_type == -1:
+                continue
+            elif rationale_type == 0 or rationale_type == 1:
+                golden_rationales.append(rationale)
+            else: # rationale_type == 2
+                for i in range(duplicate_num):
+                    golden_rationales.append(rationale)
+
+        print("After step2 selection,there are {} rationale(s) left.".format(len(golden_rationales)))
+
+        if len(golden_rationales):
+            write_in = {"Question":question,
+                        "Num of choice":item['Num of choice'],
+                        "Answer":answer,
+                        "Rationales":golden_rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+
         pbar.update(1)
-
-        if len(rationales) == 0:
-            continue
-    
-        write_in = {"Question":question,
-                    "Num of choice":num_of_choice,
-                    "Answer":answer,
-                    "Rationales":rationales}
-        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")    
     
     pbar.close()
     fout.close()
+    print(f"Total #rationale BEFORE: {total}")
+    print("Type count:",end=" ")
+    print(type_count)
 
-    # 合并之前处理的数据与此次处理的数据到STaR.jsonl文件，并生成fine-tune数据
-    merge_dataset(dir1="../data/processed/self_consistency1.jsonl",
-                  dir2=out_dir,merged_dir="../data/processed/STaR.jsonl")
-    generate_ft_data("qasc","STaR")
 
+def statistic_leakage_data(eval_model_name,dataset_name,dir_name,grouping=True):
+    # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model
+    eval_model,tokenizer = load_t5(model_name=eval_model_name)
+    dataset = load_finetuning_data(dataset_name,dir_name)
+
+    # 将是否泄露分组统计
+    if grouping: 
+        leakage_rationales,no_leakage_rationales = group_by_leaked(eval_model,tokenizer,dataset)
+
+        leaked_rate = len(leakage_rationales)/len(dataset)
+        print(f"The leaked rate of dataset {dataset_name}({dir_name}) is {leaked_rate} .")
+
+        leakage_result = statistic_las(eval_model,tokenizer,leakage_rationales)
+        print("Leakage rationales performance of metrics: {}".format(leakage_result))
+
+        no_leakage_result = statistic_las(eval_model,tokenizer,no_leakage_rationales)
+        print("No leakage rationales performance of metrics: {}".format(no_leakage_result))
+
+        las = (leakage_result['LAS'] + no_leakage_result['LAS'])/2
+    else:
+        result = statistic_las(eval_model,tokenizer,dataset)
+        las = result['LAS']
+
+    print("The LAS of dataset is {} .".format(las))
+
+
+def set_question_difficulty_level(dataset_name,loop_count):
+    # TODO：对问题进行难度评级，输出到 data/.../loop_{loop_count}文件中，相比raw文件多一个难度的属性
+    # easy: 上一轮中without opinoin即回答正确的问题
+    # hard: 上一轮中提供right opinion才回答正确的问题
+    # very hard： 上一轮中均没有回答正确的问题
+    pass
+    
 
 def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
     # 在同一数据集上，step1得到了正确回答而self-consistency未得到的问题可视为hard
@@ -645,14 +717,62 @@ def duplicate_hard_question_rationales(dataset_name,dir_name,duplicate_num = 4):
                   merged_dir=dir_name)
 
 
+def STaR(model_name,dataset_name,dir_name="self_consistency1",generate_time=20):
+    # 作为baseline，此实验在self-consistency的基础上进行
+    # 对未回答正确的，利用 Q+A（Hint）生成 A+R，并对A进行filter，A正确时对应的的R保留
+    model,tokenizer = load_llama(model_name=model_name)
+    dataset = load_unprocessed_data(dataset_name,dir_name)
+    out_dir = "../data/other/{}_QA2RA.jsonl".format(dataset_name)
+    fout = open(out_dir,mode="a+")
+
+    pbar = tqdm(total=len(dataset))
+    pbar.set_description("STaR...")
+
+    for item in dataset:
+        
+        question = item['formatted_question']
+        answer_key = item['answerKey']
+        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
+        answer = ["({})".format(answer_key),answer_text]
+        num_of_choice = len(item['choices']['label'])
+
+        rationales = using_hint_generate_ar(model,tokenizer,question,answer,generate_time)
+        pbar.update(1)
+
+        if len(rationales) == 0:
+            continue
+    
+        write_in = {"Question":question,
+                    "Num of choice":num_of_choice,
+                    "Answer":answer,
+                    "Rationales":rationales}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")    
+    
+    pbar.close()
+    fout.close()
+
+    # 合并之前处理的数据与此次处理的数据到STaR.jsonl文件，并生成fine-tune数据
+    merge_dataset(dir1="../data/processed/self_consistency1.jsonl",
+                  dir2=out_dir,merged_dir="../data/processed/STaR.jsonl")
+    generate_ft_data("qasc","STaR")
+
+
 def sample_rationales(dataset_name, dir_name, sample_rate=0.5):
     dataset = load_preprocessed_data(dataset_name,dir_name)
     out_dir = os.path.join("../data/processed",dataset_name,f"{dir_name}_{sample_rate}sample.jsonl")
     fout = open(out_dir,mode="a+")
     for item in dataset:
         rationales = item['Rationales']
-        sample_num = int(sample_rate * len(rationales)) if len(rationales) > 1 else 1
-        sampled = random.sample(rationales,sample_num)
+
+        # sample_num = int(sample_rate * len(rationales)) if len(rationales) > 1 else 1
+        # sampled = random.sample(rationales,sample_num)
+        sampled = []
+        for rationale in rationales:
+            if random.random() < sample_rate:
+                sampled.append(rationale)
+
+        if len(sampled) == 0:
+            continue
 
         write_in = {"Question":item['Question'],
                     "Num of choice":item['Num of choice'],
