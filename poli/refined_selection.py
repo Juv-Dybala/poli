@@ -3,6 +3,7 @@ import transformers
 from transformers import pipeline,AutoTokenizer,T5ForConditionalGeneration,AutoModelForCausalLM
 import os
 from tqdm import tqdm
+import re
 
 # This file uses T5.
 
@@ -12,6 +13,18 @@ QR2A_PROMPT = "Answer the question: {Question} \n There is a thought you can ref
 Q2A_PROMPT = "Answer the question: {Question} \n The answer I think is "
 R2A_PROMPT = "There is a thought of a question. \n {Rationale} \n " + \
             "You can find out the answer of the question in these options: "
+
+EXAMPLE_PROMPT = "Question: What form on angiosperms? (A) lamphreys (B) backbones (C) flowers (D) pigment (E) coliform (F) adult (G) antibodies (H) Testes" + \
+                    "Answer: (C) \n" + \
+                "Question: What parents abandon their eggs? (A) lamphreys (B) platypus (C) deer (D) Unsafe (E) mammal (F) vorticella (G) reptile (H) jellyfish" + \
+                    "Answer: (G) \n" + \
+                "Question: Where are nutrients held? (A) reefs (B) marine (C) saturated (D) tissue (E) forests (F) Earth (G) aquatic (H) flagella" + \
+                    "Answer: (D) \n" # + \
+                # "Question: what is less lightweight than cartilage but stronger? (A) skin (B) cilia (C) tissue (D) weater (E) adult (F) Type O (G) Mohs (H) bone" + \
+                #     "Answer: (H) \n" + \
+                # "Question: What is more pliable than bone? (A) Cartilage (B) tiny hairs (C) tetraceratops (D) teeth (E) femur (F) mineral (G) Therapsids (H) keratin" + \
+                #     "Answer: (A) \n"
+
 
 
 def ask_lm(input,model,tokenizer):
@@ -26,6 +39,65 @@ def ask_lm(input,model,tokenizer):
 
     lm_answer = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)[0]
     return lm_answer
+
+
+def ask_lm_prob(input,model,tokenizer,true_answer):
+    # print(input)
+    tokenized_input = tokenizer(input,return_tensors="pt",padding=True).to("cuda")
+    output = model.generate(
+        input_ids=tokenized_input["input_ids"],
+        attention_mask=tokenized_input["attention_mask"],
+        do_sample=False,  # disable sampling to test if batching affects output
+        max_new_tokens = 20,
+        return_dict_in_generate=True, # generate logits
+        output_scores = True,
+    )
+
+    # output.scores是一个tuple，元素数=生成的字符数（开始符不算），每一个元素都是这一次字符在词表（32128个词）上的得分
+    # 这个得分是对数似然，softmax转为概率
+    score = torch.stack(output.scores,dim=0).squeeze() # [seq_len-1,vocab_size]
+    score = score.softmax(-1)
+    # print(score)
+
+    # 与词表配合查看，看看生成概率高的是哪些词
+    # tops,ids = torch.topk(score,k=10,dim=1)
+    # print(tops)
+
+    output_sequence = output.sequences
+    lm_answer = tokenizer.batch_decode(output_sequence, skip_special_tokens=True)[0]
+    print(lm_answer,end=" ")
+    print(output_sequence)
+
+    answerKey = true_answer[0][1]
+    
+    if re.search(r"\([A-Z].*\)",lm_answer): #（A）格式
+        loc = torch.nonzero(torch.eq(output_sequence[0],get_vocab_loc(tokenizer,"▁(")))[0]
+        answerKey_index = get_vocab_loc(tokenizer,answerKey)
+        prob = score[loc,answerKey_index]
+    elif re.search(r"Option\s[A-Z]",lm_answer): # Option A格式
+        loc = torch.nonzero(torch.eq(output_sequence[0],get_vocab_loc(tokenizer,"▁Option")))[0]
+        answerKey_index = get_vocab_loc(tokenizer,"▁"+ answerKey)
+        prob = score[loc,answerKey_index]
+    elif true_answer[1].lower() == lm_answer.lower(): # Text大小写格式，直接找概率最高者
+        prob,_ = torch.topk(score[0],k=1)
+    else:
+        answerKey_index = get_vocab_loc(tokenizer,"▁"+ answerKey)
+        prob = score[0,answerKey_index]
+    prob = prob.item()
+    print (prob)
+    return lm_answer,prob
+
+
+def get_vocab_loc(tokenizer,target_word):
+    # 得到target_word在词表中的索引
+
+    vocab = tokenizer.get_vocab()
+    # print(target_word)
+    # print(vocab)
+    # 通过观察词表，发现在T5中，独立的词(如开头词)是需要加下划线 ▁ 的(这个和打出来的下划线_不一样...)
+    # sorted_vocab = sorted(vocab.items(), key=lambda x: x[1])
+    # print(sorted_vocab)
+    return vocab[target_word]
 
 
 def judge_answer(reply,true_answer):
@@ -192,3 +264,32 @@ def get_rationale_type(reward_model,tokenizer,question,true_answer,rationale):
     
     return rationale_type
 
+
+def q2a(model,tokenizer,question,true_answer,prob=False):
+
+    example = "Answer the following multiple choice question and follow this format: \n" + EXAMPLE_PROMPT
+
+    q2a_input = example + "Question: " + question + " \n Answer: "
+    if not prob:
+        q2a_answer = ask_lm(q2a_input,model,tokenizer)
+        print(q2a_answer,end=" ")
+        q2a = judge_answer(q2a_answer,true_answer)
+        return q2a
+    else:
+        q2a,prob = ask_lm_prob(q2a_input,model,tokenizer,true_answer)
+        return prob
+
+
+def qr2a(model,tokenizer,question,true_answer,rationale,prob=False):
+
+    example = "Answer the following multiple choice question and follow this format: \n" + EXAMPLE_PROMPT
+
+    qr2a_input = example + "Question: " + question + "\n Explanation: " + rationale + "\n Answer: "
+    if not prob:
+        qr2a_answer = ask_lm(qr2a_input,model,tokenizer)
+        print(qr2a_answer)
+        qr2a = judge_answer(qr2a_answer,true_answer)
+        return qr2a
+    else:
+        qr2a,prob = ask_lm_prob(qr2a_input,model,tokenizer,true_answer)
+        return prob

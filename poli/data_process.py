@@ -5,12 +5,14 @@ from datasets import load_dataset
 import os.path
 import re
 from pre_filter import generate_answer,using_qa_generate_rationale,using_hint_generate_ar,using_opinion_generate_ar,answer_question
-from refined_selection import select_rationale,statistic_las,group_by_leaked,get_rationale_type
+from refined_selection import select_rationale,statistic_las,group_by_leaked,get_rationale_type,q2a,qr2a
 from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data,load_unprocessed_data,merge_dataset,subtract_dataset
 import json
 import random
 import argparse
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def parse_args():
@@ -313,6 +315,9 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
 
         if not use_opinion_ft: # 默认，只生成QAR
             for rationale in golden_rationales:
+                # rationale 为列表
+                if isinstance(rationale,list):
+                    rationale = rationale[0]
                 write_in = {"Question":question,
                             "Answer":answer,
                             "Rationale":rationale}
@@ -636,6 +641,74 @@ def step2_selection(dataset_name,dir_name,small_lm_name,output,duplicate_num=2):
     print("Type count:",end=" ")
     print(type_count)
 
+
+def step2_selection_prob(dataset_name,dir_name,small_lm_name,output,threshold=0.0):
+    # 通过Q->A QR->A 的logits计算得分，大于threshold的通过selection
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
+    fout = open(output_dir,mode="a+")
+
+    # 通过率计算
+    total = 0
+    pass_count = 0
+    prob_lift_list = []
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    print("Select golden rationales. -------------------------------------")
+
+    for item in dataset:
+
+        question = item['Question']
+        print(question)
+        answer = item['Answer']
+        print(answer)
+        assert isinstance(answer,list),"The type of answer should be list."
+
+        q2a_prob = q2a(small_lm,small_tokenizer,question,answer,prob=True)
+        # print(q2a_prob)
+
+        pre_filter_rationales = item['Rationales']
+        total += len(pre_filter_rationales)
+        golden_rationales = []
+
+        for rationale in pre_filter_rationales:
+
+            qr2a_prob = qr2a(small_lm,small_tokenizer,question,answer,rationale,prob=True)
+            prob_lift = qr2a_prob - q2a_prob
+            prob_lift_list.append(prob_lift)
+            print(f"The rationale lifted the {prob_lift} probility to answer correctly!")
+
+            if prob_lift >= threshold:
+                # golden_rationales.append(rationale) 
+                golden_rationales.append([rationale,prob_lift])
+                pass_count += 1
+
+        print("After step2 selection,there are {} rationale(s) left.".format(len(golden_rationales)))
+
+        
+        if len(golden_rationales):
+            write_in = {"Question":question,
+                        "Num of choice":item['Num of choice'],
+                        "Answer":answer,
+                        "Rationales":golden_rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        pbar.update(1)
+    
+
+    pbar.close()
+    fout.close()
+    print(f"Total #rationale BEFORE: {total}")
+    print(f"Pass threshold rationale: {pass_count}")
+    # print(f"All prob lift data: {prob_lift_list}")
+    
+    # 统计 prob lift
+    plt.figure(figsize=(10,8),dpi=80)
+    sns.kdeplot(prob_lift_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
+    plt.savefig(output+".png")
+    
 
 def statistic_leakage_data(eval_model_name,dataset_name,dir_name,grouping=True):
     # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model

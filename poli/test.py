@@ -5,8 +5,25 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
+small_model_name = "google/flan-t5-small"
 
-sizes = ["small","base","large"]
+generate_ft_data(dataset_name,"prob-0.1_wo6")
+generate_ft_data(dataset_name,"prob-0.1_right7")
+generate_ft_data(dataset_name,"prob-0.1_wrong7")
+merge_dataset(['../data/finetuning/qasc/prob-0.1_wo6.jsonl',
+               '../data/finetuning/qasc/prob-0.1_right7.jsonl',
+               '../data/finetuning/qasc/prob-0.1_wrong7.jsonl'
+               ],
+               '../data/finetuning/qasc/prob-0.1.jsonl')
+
+exit()
+step2_selection_prob(dataset_name,"step1_wo_0.6sample",small_model_name,"prob-0.1_wo6",threshold=-0.1)
+step2_selection_prob(dataset_name,"step1_right_0.7sample",small_model_name,"prob-0.1_right7",threshold=-0.1)
+step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-0.1_wrong7",threshold=-0.1)
+
+
+#sizes = ["small","base","large"]
+sizes = ["large"]
 for size in sizes:
     print(f"{size} =================================================================")
     small_model_name = f"google/flan-t5-{size}"
@@ -14,7 +31,11 @@ for size in sizes:
     step2_selection(dataset_name,"step1_right_0.7sample",small_model_name,f"step12_right7_{size}")
     step2_selection(dataset_name,"step1_wrong_0.5sample",small_model_name,f"step12_wrong7_{size}")
 
-exit()
+
+
+
+
+
 count_reward = {-1:0, 0:0, 1:0, 2:0}
 dataset = load_ppo_data(dataset_name,"step1_wo6")
 
