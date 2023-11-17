@@ -65,8 +65,8 @@ def ask_lm_prob(input,model,tokenizer,true_answer):
 
     output_sequence = output.sequences
     lm_answer = tokenizer.batch_decode(output_sequence, skip_special_tokens=True)[0]
-    print(lm_answer,end=" ")
-    print(output_sequence)
+    # print(lm_answer,end=" ")
+    # print(output_sequence)
 
     answerKey = true_answer[0][1]
     
@@ -74,6 +74,13 @@ def ask_lm_prob(input,model,tokenizer,true_answer):
         loc = torch.nonzero(torch.eq(output_sequence[0],get_vocab_loc(tokenizer,"▁(")))[0]
         answerKey_index = get_vocab_loc(tokenizer,answerKey)
         prob = score[loc,answerKey_index]
+        # total = 0.0
+        # for answer in ['A','B','C','D','E','F','G','H']:  # 记录各选项概率
+        #     answer_index = get_vocab_loc(tokenizer,answer)
+        #     answer_prob = score[loc,answer_index].item()
+        #     print(f"({answer})--{answer_prob}")
+        #     total += answer_prob
+        # print("Total prob -----------------{}".format(total))
     elif re.search(r"Option\s[A-Z]",lm_answer): # Option A格式
         loc = torch.nonzero(torch.eq(output_sequence[0],get_vocab_loc(tokenizer,"▁Option")))[0]
         answerKey_index = get_vocab_loc(tokenizer,"▁"+ answerKey)
@@ -84,7 +91,7 @@ def ask_lm_prob(input,model,tokenizer,true_answer):
         answerKey_index = get_vocab_loc(tokenizer,"▁"+ answerKey)
         prob = score[0,answerKey_index]
     prob = prob.item()
-    print (prob)
+    # print (prob)
     return lm_answer,prob
 
 

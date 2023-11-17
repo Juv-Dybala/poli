@@ -10,6 +10,13 @@ from functools import partial
 from tqdm import tqdm
 from datasets_load import *
 from fine_tune import eval
+from pre_filter import extract_ar
+from refined_selection import q2a,qr2a
+from data_process import load_t5
+import wandb
+
+
+Q2A_PROMPT = "Question: {}. What do you think the answer is? Why? \nAnswer:"
 
 
 def parse_args():
@@ -31,6 +38,12 @@ def parse_args():
         "--dir_name",
         type=str,
         help="The alias directory name."
+    )
+    parser.add_argument(
+        "--reward_model",
+        type=str,
+        default="google/flan-t5-small",
+        help="The name of reward model."
     )
     parser.add_argument(
         "--lr",
@@ -56,7 +69,7 @@ def parse_args():
         type=int,
         required=True,
         default=42,
-        help="Random seed when shuffle the data."
+        help="Random seed when shuffle the data and init training."
     )
     parser.add_argument(
         "--lora_r",
@@ -84,7 +97,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def build_dataset(dataset_name,dir_name, tokenizer, max_length, seed):
+def build_dataset(dataset_name, tokenizer, max_length, seed):
     """
     Build dataset for training.
     Args:
@@ -95,17 +108,20 @@ def build_dataset(dataset_name,dir_name, tokenizer, max_length, seed):
         dataloader (`torch.utils.data.DataLoader`):
             The dataloader for the dataset.
     """
-    ds = load_ppo_data(dataset_name,dir_name)
+    # ds = load_ppo_data(dataset_name,dir_name)
+    ds = datasets_load(dataset_name)
+    # formatted_question、choices（text+label）、answerKey
    
     def tokenize(sample):
-        sample['query'] = tokenizer.encode(sample['query'])
-        sample['response'] = tokenizer.encode(sample['response'])
+        sample['query'] = sample['formatted_question'] 
+        answerKey = sample['answerKey']
+        answerText = sample['choices']['text'][ord(answerKey)-ord('A')]
+        sample['label'] = [f'({answerKey})',answerText]
         return sample
 
-    ds = ds.rename_columns({"Reward":"label"})
     ds = ds.map(tokenize, batched=False)
 
-    ds = ds.filter(lambda sample: len(sample["query"]) < max_length and len(sample["response"]) < max_length)
+    ds = ds.filter(lambda sample: len(tokenizer.encode(sample["query"])) < max_length)
     ds = ds.shuffle(seed=seed)
 
     ds.set_format(type="torch")
@@ -180,7 +196,7 @@ def print_trainable_parameters(model, use_4bit=False):
     )
 
 
-def ppo_train(args,ppo_config,model,model_ref,tokenizer,dataset,output_dir):
+def ppo_train(args,ppo_config,model,model_ref,tokenizer,reward_model_name,dataset,output_dir):
 
     model.gradient_checkpointing_enable()
     model = prepare_model_for_kbit_training(model)
@@ -202,8 +218,11 @@ def ppo_train(args,ppo_config,model,model_ref,tokenizer,dataset,output_dir):
         "top_p": 1.0,
         "do_sample": True,
         "pad_token_id": tokenizer.eos_token_id,
+        "max_new_tokens":args.max_length,
     }
     
+    reward_model,reward_tokenizer = load_t5(reward_model_name)
+
     data = enumerate(ppo_trainer.dataloader)
     pbar = tqdm(total=len(ppo_trainer.dataloader))
     pbar.set_description("PPO Training...")
@@ -213,23 +232,49 @@ def ppo_train(args,ppo_config,model,model_ref,tokenizer,dataset,output_dir):
         
         model.gradient_checkpointing_disable()
         model.pretrained_model.config.use_cache = True
-        
-        # TODO：现在是offline PPO，会造成KL散度为负
-        # 转为online PPO 作为最后一轮的训练 
 
-        query_tensors = batch["query"]
-        response_tensors = batch["response"]
-
-        rewards = batch["label"]
-        for i in range(len(rewards)):
-            rewards[i] = rewards[i].type(torch.FloatTensor).to("cuda:0")
+        questions = batch["query"]
+        labels = batch["label"]
+        batch_size = len(questions)
         
+        query_tensors = []
+        response_tensors = []
+        response_list = []
+        reward_list = []
+
+        for index in range(batch_size):
+            
+            question = questions[index]
+            true_answer = labels[index]
+            
+            query = torch.tensor(tokenizer.encode(Q2A_PROMPT.format(question))).to("cuda")
+            query_tensors.append(query)
+
+            response = ppo_trainer.generate(query,**generation_kwargs).squeeze()[query.size(0):]
+            response_tensors.append(response)
+
+            response_text = tokenizer.decode(response)
+            response_list.append(response_text)
+
+            answer,rationale = extract_ar(response_text)
+            if answer != true_answer[0][1]:
+                reward = -1.0 # 回答错误的reward值
+            else:
+                qr2a_prob = qr2a(reward_model,reward_tokenizer,question,true_answer,rationale,prob=True)
+                q2a_prob = q2a(reward_model,reward_tokenizer,question,true_answer,prob=True)
+                reward = qr2a_prob-q2a_prob
+            reward = torch.tensor(reward)
+            reward_list.append(reward)
+            print(reward,end="  ")
+            
+        batch['response'] = response_list
+
         model.gradient_checkpointing_enable()
         model.pretrained_model.config.use_cache = False
 
         #### Run PPO step
-        stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
-        ppo_trainer.log_stats(stats, batch, rewards)
+        stats = ppo_trainer.step(query_tensors, response_tensors, reward_list)
+        ppo_trainer.log_stats(stats, batch, reward_list)
 
         pbar.update()
     
@@ -250,12 +295,15 @@ if __name__ == '__main__':
     model_name = args.model_name
     dataset_name = args.dataset
     dir_name = args.dir_name
+    reward_model_name = args.reward_model
 
     output_dir = os.path.join("../result/ppo_model",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    if os.path.exists(output_dir):
-        model_save_directory = output_dir
+    pretrained_model_directory = os.path.join("../result/ckpt",dir_name)
+    
+    if os.path.exists(pretrained_model_directory):
+        model_save_directory = pretrained_model_directory
     else:
         model_save_directory = original_model_save_directory
 
@@ -263,8 +311,10 @@ if __name__ == '__main__':
         model_name=model_name,
         learning_rate=args.lr,
         batch_size=args.batch_size,
-        # log_with="wandb",
+        seed = args.seed,
+        log_with="wandb",
     )
+    wandb.init(project="ppo")
 
     bnb_config = create_bnb_config()
 
@@ -274,14 +324,14 @@ if __name__ == '__main__':
         device_map = "auto"
         )
 
-    model_ref = AutoModelForCausalLMWithValueHead.from_pretrained(original_model_save_directory)
+    model_ref = AutoModelForCausalLMWithValueHead.from_pretrained(model_save_directory)
     tokenizer = AutoTokenizer.from_pretrained(model_save_directory)
     tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = build_dataset(dataset_name,dir_name,tokenizer,args.max_length,seed=args.seed)
+    dataset = build_dataset(dataset_name,tokenizer,args.max_length,seed=args.seed)
     print(dataset)
 
-    model,tokenizer = ppo_train(args,ppo_config,model,model_ref,tokenizer,dataset,output_dir)
+    model,tokenizer = ppo_train(args,ppo_config,model,model_ref,tokenizer,reward_model_name,dataset,output_dir)
 
     print("Evaluate model...")
     eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)

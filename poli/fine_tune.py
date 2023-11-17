@@ -56,7 +56,7 @@ def parse_args():
         type=int,
         required=True,
         default=42,
-        help="Random seed when shuffle the data."
+        help="Random seed when shuffle the data and init training."
     )
     parser.add_argument(
         "--lora_r",
@@ -335,6 +335,7 @@ def train(model, tokenizer, dataset, log_dir,output_dir, args):
             logging_steps=1,
             output_dir=os.path.join("../log",log_dir),
             optim="paged_adamw_8bit",
+            seed=args.seed,
         ),
         data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False)
     )
