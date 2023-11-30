@@ -251,7 +251,7 @@ def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, gro
     return rationales,answer_list
 
 
-def answer_question(large_lm, tokenizer,question, ground_answer, generate_time):
+def answer_question(large_lm, tokenizer, question, ground_answer, generate_time):
     input = "Question:"+ question + ". What do you think the answer is? Please think step by step.\n \
         Answer: The correct answer is"
     reply = large_lm(
@@ -274,3 +274,28 @@ def answer_question(large_lm, tokenizer,question, ground_answer, generate_time):
     
     # print("Generated {} rationales without opinion.".format(len(rationales)))
     return rationales,answer_list
+
+
+def statistic_failed_ar(large_lm,tokenizer,question, ground_answer, generate_time):
+    input = "Question:"+ question + ". What do you think the answer is? Please think step by step.\n \
+        Answer: The correct answer is"
+    reply = large_lm(
+        input,
+        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
+        top_k=10,
+        num_return_sequences=generate_time, #要返回多少个不同输出
+        eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
+        max_length=500, #生成文本最大长度
+    )
+    failed_rationales = []
+    answer_list = []
+    for seq in reply:
+        whole_answer = seq['generated_text'].split("Answer:")[-1]
+        answer,rationale = extract_ar(whole_answer)
+        answer_list.append(answer)
+
+        if answer != ground_answer[0][1]:
+            failed_rationales.append(rationale)
+    
+    # print("Generated {} rationales without opinion.".format(len(rationales)))
+    return failed_rationales,answer_list

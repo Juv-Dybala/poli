@@ -4,7 +4,7 @@ from transformers import pipeline,AutoTokenizer,AutoModelForCausalLM,T5ForCondit
 from datasets import load_dataset
 import os.path
 import re
-from pre_filter import generate_answer,using_qa_generate_rationale,using_hint_generate_ar,using_opinion_generate_ar,answer_question
+from pre_filter import generate_answer,using_qa_generate_rationale,using_hint_generate_ar,using_opinion_generate_ar,answer_question,statistic_failed_ar
 from refined_selection import select_rationale,statistic_las,group_by_leaked,get_rationale_type,q2a,qr2a
 from datasets_load import datasets_load,load_preprocessed_data,load_finetuning_data,load_unprocessed_data,merge_dataset,subtract_dataset
 import json
@@ -144,7 +144,7 @@ def fillter_rationale(large_lm_name,small_lm_name,dataset_name,dir_name,split='t
     Answer: The correct answer is
     '''
     
-    log_save_directory = os.path.join("../log",dataset_name,"{}.json".format(dir_name))
+    log_save_directory = os.path.join("../log/sft",dataset_name,"{}.json".format(dir_name))
     
     dataset_acc = {"wo":0,"right":0,"wrong":0}
     vote_count = 0  # 判断投票得出的结果与数据集提供答案的一致性 
@@ -709,6 +709,64 @@ def step2_selection_prob(dataset_name,dir_name,small_lm_name,output,threshold=0.
     sns.kdeplot(prob_lift_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
     plt.savefig(output+".png")
     
+
+def statistic_failed_generation(large_lm_name,small_lm_name,dataset_name):
+    dataset = datasets_load(dataset_name,split='train')
+    print(dataset)
+    large_lm,large_tokenizer = load_llama(large_lm_name)
+    small_lm,small_tokenizer = load_t5(small_lm_name)
+
+    output_dir = os.path.join("../data/other/failed_ar_wo6.jsonl")
+    fout = open(output_dir,mode="a+")
+
+    print("Generate and Prefilter rationales. ----------------------------------------")
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+    prob_lift_list = []
+    for item in dataset:
+        question = item['formatted_question']
+        print("=================================================================")
+        print(f"Question: {question}")
+
+        answer_key = item['answerKey']
+        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
+        answer = ["({})".format(answer_key),answer_text]
+        print(answer)
+
+        # test w/o opinion
+        failed_rationales,answers = statistic_failed_ar(large_lm,large_tokenizer,
+                                            question,ground_answer=answer,generate_time=6)
+        print(answers)
+        print("Generate {} failed a-rs without opinion.".format(len(failed_rationales)))
+        
+        q2a_prob = q2a(small_lm,small_tokenizer,question,answer,prob=True)
+        for rationale in failed_rationales:
+            print(rationale)
+            if rationale is None:
+                rationale = ""
+            qr2a_prob = qr2a(small_lm,small_tokenizer,question,answer,rationale,prob=True)
+            prob_lift = qr2a_prob - q2a_prob
+            prob_lift_list.append(prob_lift)
+            print(f"The rationale lifted the {prob_lift} probility to answer correctly!")
+        
+        if len(failed_rationales):
+            write_in = {"Question":question,
+                        "Num of choice":len(item['choices']['label']),
+                        "Answer":answer,
+                        "Rationales":failed_rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        pbar.update(1)
+
+    pbar.close()
+    fout.close()
+    print(f"Total #rationale FAILED: {len(prob_lift_list)}")
+    
+    # 统计 prob lift
+    plt.figure(figsize=(10,8),dpi=80)
+    sns.kdeplot(prob_lift_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
+    plt.savefig("failed_ar_wo6.png")
+
 
 def statistic_leakage_data(eval_model_name,dataset_name,dir_name,grouping=True):
     # 对泄露进行统计分析：LAS，分析对象是QAR数据集(重点在R)，不是model
