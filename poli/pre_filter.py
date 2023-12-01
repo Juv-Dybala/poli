@@ -7,7 +7,9 @@ import re
 # This file uses llama2.
 model_name = "meta-llama/Llama-2-7b-chat-hf"
 
-
+# sampling decoding
+generate_config = {'do_sample':True,'temperature':1.2,
+                   'max_new_tokens':200}
 
 def self_consitency(answer_record):
     ground_answer = None
@@ -20,42 +22,39 @@ def self_consitency(answer_record):
 
 # 从完整的生成答案中抽取出answer和rationale
 def extract_ar(whole_answer):
-    # split_answer = whole_answer.split("Explanation:")
-    # if len(split_answer) == 2:
-    #     answer,rationale = split_answer
-    # else:
-    #     sentences = whole_answer.split(".")
-    #     answer = sentences[0]
-    #     rationale = ".".join(sentences[1:])
-    # answer = re.findall(r"\([A-Z].*\)",answer)[0][1]
-
-    sentences = whole_answer.split(".")
-    ans = re.search(r"\([A-Z].*\)",sentences[0])
-    if not ans:
+    pattern_str = r"The correct answer is .*?\."
+    answer = re.search(pattern_str,whole_answer)
+    if not answer:
         return None,None
-    answer = ans.group()[1]
+    answer = answer.group()
+    rationale = whole_answer[len(answer):]
+    answer = answer[21:]
     
+    answerKey = re.search(r"\([A-Z].*\)",answer)
+    if not answerKey:
+        return None,None
+    answerKey = answerKey.group()[1]
+    
+    sentences = rationale.split(".")
     extract_rationale = []
     for sentence in sentences:
-        res = re.search(r"\("+answer+".*\)",sentence)
-        if res and re.search(r"Answer",sentence,flags=re.I):
-            answer = res.group()[1]
-        elif sentence.isspace() or sentence == "":
+        if sentence.isspace() or sentence == "":
             continue
+        elif "Question:" in sentence:
+            break
         else:
             extract_rationale.append(sentence)
 
     rationale = ".\n".join(extract_rationale)
-    return answer,rationale
+    return answerKey,rationale
+
 
 def ask_lm(lm,tokenizer,input,num_return_sequences,answer_record,rationale_sets):
     reply = lm(
         input,
-        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
-        top_k=10,
         num_return_sequences=num_return_sequences, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
-        max_length=500, #生成文本最大长度
+        **generate_config
     )
     answer_list = []
     for seq in reply:
@@ -171,11 +170,9 @@ def using_qa_generate_rationale(large_lm, tokenizer, question, answer, generate_
         Why? Please think step by step. \n Answer: "
     reply = large_lm(
         input,
-        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
-        top_k=10,
         num_return_sequences=generate_time, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
-        max_length=500, #生成文本最大长度
+        **generate_config
     )
     
     rationales = []
@@ -206,11 +203,9 @@ def using_hint_generate_ar(large_lm, tokenizer, question, ground_answer, generat
     print(input)
     reply = large_lm(
         input,
-        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
-        top_k=10,
         num_return_sequences=generate_time, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
-        max_length=500, #生成文本最大长度
+        **generate_config
     )
 
     rationales = []
@@ -227,15 +222,13 @@ def using_hint_generate_ar(large_lm, tokenizer, question, ground_answer, generat
 
 def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, ground_answer, generate_time):
     opinion = "I think the answer is ({}),what do you think about? Why?".format(opinion_choice)
-    input = "Question:"+ question +". Opinion:"+ opinion +"Please think step by step."+"\n \
+    input = "Question:"+ question +"\nOpinion:"+ opinion +"Please think step by step."+"\n \
             Answer: The correct answer is"
     reply = large_lm(
         input,
-        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
-        top_k=10,
-        num_return_sequences=generate_time, #要返回多少个不同输出
+        num_return_sequences=1, #generate_time, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
-        max_length=500, #生成文本最大长度
+        **generate_config
     )
     rationales = []
     answer_list = []
@@ -251,16 +244,14 @@ def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, gro
     return rationales,answer_list
 
 
-def answer_question(large_lm, tokenizer, question, ground_answer, generate_time):
-    input = "Question:"+ question + ". What do you think the answer is? Please think step by step.\n \
+def answer_question(large_lm, tokenizer,question, ground_answer, generate_time):
+    input = "Question:"+ question + "\nPlease think step by step.\n \
         Answer: The correct answer is"
     reply = large_lm(
         input,
-        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
-        top_k=10,
-        num_return_sequences=generate_time, #要返回多少个不同输出
+        num_return_sequences=1, # generate_time, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
-        max_length=500, #生成文本最大长度
+        **generate_config
     )
     rationales = []
     answer_list = []
@@ -281,11 +272,10 @@ def statistic_failed_ar(large_lm,tokenizer,question, ground_answer, generate_tim
         Answer: The correct answer is"
     reply = large_lm(
         input,
-        do_sample=True, #是否选用对top-k个候选词随机采样的方式生成文本
         top_k=10,
         num_return_sequences=generate_time, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
-        max_length=500, #生成文本最大长度
+        **generate_config
     )
     failed_rationales = []
     answer_list = []

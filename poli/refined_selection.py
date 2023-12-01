@@ -272,11 +272,14 @@ def get_rationale_type(reward_model,tokenizer,question,true_answer,rationale):
     return rationale_type
 
 
-def q2a(model,tokenizer,question,true_answer,prob=False):
+def q2a(model,tokenizer,question,true_answer,prob=False,few_shot=True):
 
     example = "Answer the following multiple choice question and follow this format: \n" + EXAMPLE_PROMPT
 
-    q2a_input = example + "Question: " + question + " \n Answer: "
+    if few_shot:
+        q2a_input = example + "Question: " + question + " \n Answer: "
+    else:
+        q2a_input = "Question: " + question + " \n Answer: "
     if not prob:
         q2a_answer = ask_lm(q2a_input,model,tokenizer)
         print(q2a_answer,end=" ")
@@ -287,11 +290,14 @@ def q2a(model,tokenizer,question,true_answer,prob=False):
         return prob
 
 
-def qr2a(model,tokenizer,question,true_answer,rationale,prob=False):
+def qr2a(model,tokenizer,question,true_answer,rationale,prob=False,few_shot=True):
 
     example = "Answer the following multiple choice question and follow this format: \n" + EXAMPLE_PROMPT
-
-    qr2a_input = example + "Question: " + question + "\n Explanation: " + rationale + "\n Answer: "
+    
+    if few_shot:
+        qr2a_input = example + "Question: " + question + "\n Explanation: " + rationale + "\n Answer: "
+    else:
+        qr2a_input = "Question: " + question + "\n Explanation: " + rationale + "\n Answer: "
     if not prob:
         qr2a_answer = ask_lm(qr2a_input,model,tokenizer)
         print(qr2a_answer)

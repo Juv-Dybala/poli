@@ -1,38 +1,40 @@
-from data_process import model_download,step2_selection,generate_ft_data,statistic_leakage_data,STaR
 from data_process import *
 from datasets_load import *
+from data_utils import *
 from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-small_model_name = "google/flan-t5-small"
 
-generate_ft_data(dataset_name,"prob-0.1_wo6")
-generate_ft_data(dataset_name,"prob-0.1_right7")
-generate_ft_data(dataset_name,"prob-0.1_wrong7")
-merge_dataset(['../data/finetuning/qasc/prob-0.1_wo6.jsonl',
-               '../data/finetuning/qasc/prob-0.1_right7.jsonl',
-               '../data/finetuning/qasc/prob-0.1_wrong7.jsonl'
-               ],
-               '../data/finetuning/qasc/prob-0.1.jsonl')
-
+# filter_threshold(dataset_name,"prob_base_wo6",-0.5)
+# filter_threshold(dataset_name,"prob_base_right7",-0.5)
+# filter_threshold(dataset_name,"prob_base_wrong7",-0.5)
+select_best_worst(dataset_name,"prob_base_wo6")
 exit()
-step2_selection_prob(dataset_name,"step1_wo_0.6sample",small_model_name,"prob-0.1_wo6",threshold=-0.1)
-step2_selection_prob(dataset_name,"step1_right_0.7sample",small_model_name,"prob-0.1_right7",threshold=-0.1)
-step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-0.1_wrong7",threshold=-0.1)
+
+generate_ft_data(dataset_name,"prob_base_right7_-0.5filter")
+generate_ft_data(dataset_name,"prob_base_wo6_-0.5filter")
+generate_ft_data(dataset_name,"prob_base_wrong7_-0.5filter")
+merge_dataset([f"../data/finetuning/qasc/prob_base_right7_-0.5filter.jsonl",
+            f"../data/finetuning/qasc/prob_base_wrong7_-0.5filter.jsonl",
+            f"../data/finetuning/qasc/prob_base_wo6_-0.5filter.jsonl"],
+            merged_dir=f"../data/finetuning/qasc/base-0.5.jsonl")
 
 
-#sizes = ["small","base","large"]
-sizes = ["large"]
+
+
+
+
+step1_generate(large_model_name,dataset_name,inference_num={"wo":10,"right":10})
+
+sizes = ["small"] # ,"base","large"]
 for size in sizes:
     print(f"{size} =================================================================")
     small_model_name = f"google/flan-t5-{size}"
-    step2_selection(dataset_name,"step1_wo_0.6sample",small_model_name,f"step12_wo6_{size}")
-    step2_selection(dataset_name,"step1_right_0.7sample",small_model_name,f"step12_right7_{size}")
-    step2_selection(dataset_name,"step1_wrong_0.5sample",small_model_name,f"step12_wrong7_{size}")
-
-
-
+    step2_selection(dataset_name,"step1_wo_0.6sample",small_model_name,f"type_wo6_{size}")
+    step2_selection(dataset_name,"step1_right_0.7sample",small_model_name,f"type_right7_{size}")
+    step2_selection(dataset_name,"step1_wrong_0.5sample",small_model_name,f"type_wrong7_{size}")
+   
 
 
 

@@ -1,5 +1,5 @@
 import os
-from datasets import load_dataset,concatenate_datasets
+from datasets import load_dataset,concatenate_datasets,Dataset
 import re
 import json
 
@@ -39,7 +39,25 @@ def datasets_load(dataset_name,subset=None,split='train'):
         return load_openbookQA(split)
     elif dataset_name == "ai2_arc":
         return load_ai2arc(subset=subset,split=split)
+    elif dataset_name == "aqua_rat":
+        return load_aqua(split)
     # TODO：其他数据集之后往这里加
+
+
+def math_datasets_load(dataset_name,subset=None,split='train'):
+    # 无选项
+    # 需要的col:
+    # question、answerNum
+    if subset:
+        dataset_dir = os.path.join("../data/raw",dataset_name,subset)
+    else:
+        dataset_dir = os.path.join("../data/raw",dataset_name)
+    if not os.path.exists(dataset_dir):
+        os.makedirs(dataset_dir)
+        dataset_download(dataset_name,subset)
+    
+    if dataset_name == "gsm8k":
+        return load_gsm8k(subset,split)
 
 
 def load_qasc(split='Train'):
@@ -87,6 +105,33 @@ def load_ai2arc(subset,split='Train'):
     return dataset
 
 
+def load_aqua(split='Train'):
+    dataset_name = "aqua_rat"
+    dataset_dir = os.path.join("../data/raw",dataset_name,"{}.json".format(split))
+    dataset = load_dataset("json",data_files=dataset_dir)['train']
+    # features:['question','options','rationale','correct']
+    dataset = dataset.rename_column('correct','answerKey')
+    def _process_data(item):
+        question_stem = item['question']
+        choices = {'label':[],'text':[]}
+        options_str = ""
+        for option in item['options']:
+            split_list = option.split(")")
+            key = split_list[0]
+            text = split_list[-1]
+            choices['label'].append(key)
+            choices['text'].append(text)
+            options_str += " ("+option
+        item['formatted_question'] = question_stem + options_str
+        item['choices'] = choices
+        return item
+    
+    dataset = dataset.map(_process_data)
+    dataset = dataset.select_columns(['formatted_question','choices','answerKey'])
+    print(dataset)
+    return dataset
+
+
 def get_formatted_question(item):
     formatted_question = item['question']
     labels = item['choices']['label']
@@ -99,11 +144,29 @@ def get_formatted_question(item):
     return item
     
 
+def load_gsm8k(subset='main',split='Train'):
+    dataset_name = "gsm8k"
+    dataset_dir = os.path.join("../data/raw",dataset_name,subset,"{}.json".format(split))
+    dataset = load_dataset("json",data_files=dataset_dir)['train']
+    # features:['question','answer']
+    def _process_data(item):
+        rationale,answer = item['answer'].split("#### ")
+        item['answerNum'] = answer
+        return item
+    dataset = dataset.map(_process_data)
+    dataset = dataset.select_columns(['question','answerNum'])
+    print(dataset)
+    return dataset
+
+
 def load_preprocessed_data(dataset_name,dir_name):
     # cols:'Question', 'Num of choice', 'Answer', 'Rationales'(list)
     dataset_dir = os.path.join("../data/processed",dataset_name,f"{dir_name}.jsonl")
-    dataset = load_dataset('json',data_files=dataset_dir)['train']
-    print(dataset)
+    try:
+        dataset = load_dataset('json',data_files=dataset_dir)['train']
+        print(dataset)
+    except:
+        dataset = load_unformatted_data(dataset_dir)
     return dataset
 
 
@@ -119,6 +182,24 @@ def load_ppo_data(dataset_name,dir_name):
     # cols:'Query','Response','Reward'
     dataset_dir = os.path.join("../data/ppo",dataset_name,f"{dir_name}.jsonl")
     dataset = load_dataset('json',data_files=dataset_dir)['train']
+    print(dataset)
+    return dataset
+
+
+def load_unformatted_data(dir_path):
+    # 应对执行load_dataset时出错的情形，逐行读取
+    # 出错主要在于rationale项混杂了str（rationale）和float（reward），无法生成dataset
+    # 处理时将reward去掉生成dataset
+    file = open(dir_path,'r',encoding='utf-8')
+    datas = []
+    for line in file.readlines():
+        dic = json.loads(line)
+        rationales = []
+        for rationale,reward in dic['Rationales']:
+            rationales.append(rationale)
+        dic['Rationales'] = rationales
+        datas.append(dic)
+    dataset = Dataset.from_list(datas)
     print(dataset)
     return dataset
 

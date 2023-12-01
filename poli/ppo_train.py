@@ -228,7 +228,7 @@ def ppo_train(args,ppo_config,model,model_ref,tokenizer,reward_model_name,datase
     pbar.set_description("PPO Training...")
 
     for epoch, batch in data:
-        print(f"\nepoch:{epoch}")
+        print(f"epoch:{epoch}")
         
         model.gradient_checkpointing_disable()
         model.pretrained_model.config.use_cache = True
@@ -265,7 +265,7 @@ def ppo_train(args,ppo_config,model,model_ref,tokenizer,reward_model_name,datase
                 reward = qr2a_prob-q2a_prob
             reward = torch.tensor(reward)
             reward_list.append(reward)
-            print(reward.item(),end="  ")
+            print(reward,end="  ")
             
         batch['response'] = response_list
 
@@ -314,7 +314,7 @@ if __name__ == '__main__':
         seed = args.seed,
         log_with="wandb",
     )
-    wandb.init(project="ppo",dir="../log")
+    wandb.init(project="ppo")
 
     bnb_config = create_bnb_config()
 
