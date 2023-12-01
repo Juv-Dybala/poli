@@ -11,13 +11,13 @@ from transformers.data import default_data_collator
 from datasets import load_dataset
 import json
 import copy
-from inference_eval import inference_eval
+from eval import inference_eval
 from datasets_load import datasets_load
 
 
 QUESTION_PROMPT = {
     "no_opinion": 
-        "Question: {Question}. What do you think the answer is? Why? \n",
+        "Question: {Question}. \n",
     "with_opinion": 
         "Question: {Question}. Opinion: I think the answer is ({Opinion}), what do you think about? Why? \n"
 }
@@ -210,7 +210,6 @@ def preprocess_dataset(dataset_name, dir_name, tokenizer, max_length, seed):
     # Load data
     print("Loading dataset:{}...".format(dataset_name))
 
-    # dataset_dir = "../data/finetuning/{}.jsonl".format(dir_name)
     dataset_dir = os.path.join("../data/finetuning",dataset_name,"{}.jsonl".format(dir_name))
     datas = load_dataset('json',data_files=dataset_dir)
     
@@ -355,18 +354,16 @@ def train(model, tokenizer, dataset, log_dir,output_dir, args):
     for k, v in dtypes.items():
         print(k, v, v/total)
      
-    do_train = True
-    
     # Launch training
     print("Training...")
     
-    if do_train:
-        train_result = trainer.train()
-        metrics = train_result.metrics
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
-        print(metrics)    
+    
+    train_result = trainer.train()
+    metrics = train_result.metrics
+    trainer.log_metrics("train", metrics)
+    trainer.save_metrics("train", metrics)
+    trainer.save_state()
+    print(metrics)    
     
     ###
     
@@ -411,6 +408,7 @@ if __name__ == "__main__":
         model_save_directory = output_merged_dir
     else:
         model_save_directory = original_model_save_directory
+    print("dir:{}".format(model_save_directory))
 
     bnb_config = create_bnb_config()
     model = AutoModelForCausalLM.from_pretrained(model_save_directory,

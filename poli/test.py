@@ -1,6 +1,6 @@
-from data_process import model_download,step2_selection,generate_ft_data,statistic_leakage_data,STaR
 from data_process import *
 from datasets_load import *
+from data_utils import *
 from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
@@ -43,6 +43,10 @@ qr2a_prob = qr2a(model,tokenizer,question,answer,rationale,prob=True)
 print(q2a_prob)
 print(qr2a_prob)
 
+# filter_threshold(dataset_name,"prob_base_wo6",-0.5)
+# filter_threshold(dataset_name,"prob_base_right7",-0.5)
+# filter_threshold(dataset_name,"prob_base_wrong7",-0.5)
+select_best_worst(dataset_name,"prob_base_wo6")
 exit()
 
 
@@ -51,17 +55,20 @@ exit()
 
 
 
-#sizes = ["small","base","large"]
-sizes = ["large"]
+
+
+
+
+step1_generate(large_model_name,dataset_name,inference_num={"wo":10,"right":10})
+
+sizes = ["small"] # ,"base","large"]
 for size in sizes:
     print(f"{size} =================================================================")
     small_model_name = f"google/flan-t5-{size}"
-    step2_selection(dataset_name,"step1_wo_0.6sample",small_model_name,f"step12_wo6_{size}")
-    step2_selection(dataset_name,"step1_right_0.7sample",small_model_name,f"step12_right7_{size}")
-    step2_selection(dataset_name,"step1_wrong_0.5sample",small_model_name,f"step12_wrong7_{size}")
-
-
-
+    step2_selection(dataset_name,"step1_wo_0.6sample",small_model_name,f"type_wo6_{size}")
+    step2_selection(dataset_name,"step1_right_0.7sample",small_model_name,f"type_right7_{size}")
+    step2_selection(dataset_name,"step1_wrong_0.5sample",small_model_name,f"type_wrong7_{size}")
+   
 
 
 
