@@ -292,6 +292,7 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
     out_dir = os.path.join("../data/finetuning",dataset_name,"{}.jsonl".format(dir_name))
     fin = open(in_dir,mode="r+")
     fout = open(out_dir,mode="w+")
+    fout.truncate()
 
     for line in fin:
         item = json.loads(line)
@@ -520,9 +521,12 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
         pbar.update(1)
     
     pbar.close()
-    fwo.close()
-    fright.close()
-    fwrong.close()
+    if 'wo' in inference_num:
+        fwo.close()
+    if 'right' in inference_num:
+        fright.close()
+    if 'wrong' in inference_num:
+        fwrong.close()
 
     print(pass_count)
     
