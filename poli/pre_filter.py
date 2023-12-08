@@ -226,7 +226,7 @@ def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, gro
             Answer: The correct answer is"
     reply = large_lm(
         input,
-        num_return_sequences=1, #generate_time, #要返回多少个不同输出
+        num_return_sequences=generate_time, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
         **generate_config
     )
@@ -249,7 +249,7 @@ def answer_question(large_lm, tokenizer,question, ground_answer, generate_time):
         Answer: The correct answer is"
     reply = large_lm(
         input,
-        num_return_sequences=1, # generate_time, #要返回多少个不同输出
+        num_return_sequences=generate_time, #要返回多少个不同输出
         eos_token_id=tokenizer.eos_token_id, #生成文本时遇到哪个符号停止生成
         **generate_config
     )

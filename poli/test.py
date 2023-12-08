@@ -5,20 +5,32 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-small_model_name = "google/flan-t5-base"
+small_model_name = "google/flan-t5-large"
 
-step2_selection_prob(dataset_name,"step1_wo_0.6sample",small_model_name,"prob-base_wo6",threshold=-1)
-step2_selection_prob(dataset_name,"step1_right_0.7sample",small_model_name,"prob-base_right7",threshold=-1)
-step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-base_wrong7",threshold=-1)
+step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_large",threshold=-1)
+step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10_large",threshold=-1)
+# step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-base_wrong7",threshold=-1)
+
+# generate_ft_data(dataset_name,"step1_wo10")
+# generate_ft_data(dataset_name,"step1_right10")
+# merge_dataset(dir_list=["../data/finetuning/qasc/step1_wo10.jsonl",
+#                         "../data/finetuning/qasc/step1_right10.jsonl"],
+#                 merged_dir="../data/finetuning/qasc/step1_wo10+right10.jsonl")
+# generate_ft_data(dataset_name,"prob-0.25_wrong7")
 exit()
+step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
+
+step1_generate(large_model_name,dataset_name,inference_num={'wo':10,'right':10})
+
+
+
+
 
 statistic_failed_generation(large_model_name,small_model_name,dataset_name)
 
+select_best_worst(dataset_name,dir_name="prob-all_wo6")
 
 
-generate_ft_data(dataset_name,"prob-0.25_wo6")
-generate_ft_data(dataset_name,"prob-0.25_right7")
-generate_ft_data(dataset_name,"prob-0.25_wrong7")
 merge_dataset(['../data/finetuning/qasc/prob-0.25_wo6.jsonl',
                '../data/finetuning/qasc/prob-0.25_right7.jsonl',
                '../data/finetuning/qasc/prob-0.25_wrong7.jsonl'

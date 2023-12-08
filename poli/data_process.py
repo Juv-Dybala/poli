@@ -99,6 +99,8 @@ def load_llama(model_name):
     tokenizer = AutoTokenizer.from_pretrained(model_save_directory)
     model = AutoModelForCausalLM.from_pretrained(model_save_directory).to("cuda")
     print(model)
+    model = model.half()
+    print(model.dtype)
     print("------------------------------------------------------")
     
     large_lm= transformers.pipeline(
@@ -520,9 +522,12 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
         pbar.update(1)
     
     pbar.close()
-    fwo.close()
-    fright.close()
-    fwrong.close()
+    if 'wo' in inference_num:
+        fwo.close()
+    if 'right' in inference_num:
+        fright.close()
+    if 'wrong' in inference_num:
+        fwrong.close()
 
     print(pass_count)
     
