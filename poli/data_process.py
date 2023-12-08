@@ -523,9 +523,12 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
         pbar.update(1)
     
     pbar.close()
-    fwo.close()
-    fright.close()
-    fwrong.close()
+    if 'wo' in inference_num:
+        fwo.close()
+    if 'right' in inference_num:
+        fright.close()
+    if 'wrong' in inference_num:
+        fwrong.close()
 
     print(pass_count)
     
