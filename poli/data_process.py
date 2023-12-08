@@ -595,8 +595,10 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
         pbar.update(1)
     
     pbar.close()
-    fwo.close()
-    fright.close()
+    if 'wo' in inference_num:
+        fwo.close()
+    if 'right' in inference_num:
+        fright.close()
 
     print(pass_count)
 
