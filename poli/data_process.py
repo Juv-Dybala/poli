@@ -3,9 +3,10 @@ import transformers
 from transformers import AutoTokenizer,AutoModelForCausalLM,T5ForConditionalGeneration
 import os.path
 import re
-from pre_filter import generate_answer,using_qa_generate_rationale,using_opinion_generate_ar,answer_question
+from pre_filter import generate_answer,using_qa_generate_rationale,using_opinion_generate_ar, \
+        answer_question,answer_math_question,using_opinion_generate_math_ar
 from refined_selection import select_rationale,get_rationale_type,q2a,qr2a
-from datasets_load import datasets_load,load_preprocessed_data
+from datasets_load import datasets_load,load_preprocessed_data,math_datasets_load
 import json
 import random
 import argparse
@@ -292,8 +293,10 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
 
     in_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(dir_name))
     out_dir = os.path.join("../data/finetuning",dataset_name,"{}.jsonl".format(dir_name))
+
     fin = open(in_dir,mode="r+")
     fout = open(out_dir,mode="w+")
+    fout.truncate()
 
     for line in fin:
         item = json.loads(line)
@@ -531,6 +534,76 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
 
     print(pass_count)
     
+
+def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
+    # 用于inference 数学应用题 数据集
+    dataset = math_datasets_load(dataset_name,subset='main',split='train')
+    print(dataset)
+
+    dir_name = "../data/processed/{}".format(dataset_name)
+    os.makedirs(dir_name,exist_ok=True)
+    if 'wo' in inference_num:
+        fwo = open(os.path.join(dir_name,f"step1_wo{inference_num['wo']}.jsonl"),mode="a+")
+    if 'right' in inference_num:
+        fright = open(os.path.join(dir_name,f"step1_right{inference_num['right']}.jsonl"),mode="a+")
+
+    pass_count = {"wo":0, "right":0}
+
+    large_lm,tokenizer = load_llama(model_name=large_lm_name)
+    print("Generate and Prefilter rationales. ----------------------------------------")
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    for item in dataset:
+        question = item['question']
+        answerNum = item['answerNum']
+        print("=================================================================")
+        print(f"Question: {question}")
+        print(f"Correct answerNum: {answerNum}")
+
+        # without opinion
+        if 'wo' in inference_num:
+            wo_rationales,wo_answers = answer_math_question(large_lm,tokenizer,question,
+                                            ground_answer=answerNum,generate_time=inference_num['wo'])
+            print(wo_answers)
+            pass_count['wo'] += len(wo_rationales)
+            print("Generate {} rationales without opinion.".format(len(wo_rationales)))
+            print("TEMP PASSing RATE : {}".format(pass_count["wo"]/((pbar.n+1)*inference_num["wo"])))
+
+            if len(wo_rationales):
+                write_in = {"Question":question,
+                            "Answer":answerNum,
+                            "Rationales":wo_rationales}
+                fwo.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        
+        # true opinion
+        if 'right' in inference_num:
+            right_rationales,right_answers = using_opinion_generate_math_ar(large_lm,tokenizer,question,opinion_num=answerNum,
+                                                        ground_answer=answerNum,generate_time=inference_num['right'])
+            print(right_answers)
+            pass_count['right'] += len(right_rationales)
+            print("Generate {} rationales using right opinion.".format(len(right_rationales)))
+            print("TEMP PASSing RATE : {}".format(pass_count["right"]/((pbar.n+1)*inference_num["right"])))
+
+            if len(right_rationales):
+                write_in = {"Question":question,
+                            "Answer":answerNum,
+                            "Rationales":right_rationales}
+                fright.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        
+        # wrong opinion (todo)
+        
+        pbar.update(1)
+    
+    pbar.close()
+    if 'wo' in inference_num:
+        fwo.close()
+    if 'right' in inference_num:
+        fright.close()
+
+    print(pass_count)
+
 
 def step2_selection_simple(dataset_name,dir_name,small_lm_name,output):
     # QR->A的即通过filter
