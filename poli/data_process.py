@@ -577,7 +577,7 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
         
         # true opinion
         if 'right' in inference_num:
-            right_rationales,right_answers = using_opinion_generate_math_ar(large_lm,tokenizer,question,opinion_choice=answer[0],
+            right_rationales,right_answers = using_opinion_generate_math_ar(large_lm,tokenizer,question,opinion_num=answerNum,
                                                         ground_answer=answerNum,generate_time=inference_num['right'])
             print(right_answers)
             pass_count['right'] += len(right_rationales)
