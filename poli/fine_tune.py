@@ -385,6 +385,7 @@ def train(model, tokenizer, dataset, log_dir,output_dir, args):
     del trainer
     torch.cuda.empty_cache()
 
+
 def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
 
     eval_data = datasets_load(dataset_name,split=split)
@@ -395,6 +396,18 @@ def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
     print(result)
     return result
     
+
+def eval_ckpts(dir_name,dataset_name,split='validation'):
+    result = {}
+    ckpt_dir = os.path.join("../log/",dir_name)
+    eval_data = datasets_load(dataset_name,split=split)
+    
+    for ckpt_name in next(os.walk(ckpt_dir))[1]:
+        ckpt_path = os.path.join(ckpt_dir,ckpt_name)
+        score = ckpt_eval(ckpt_path,eval_data)
+        result[ckpt_name] = score
+    return result
+
 
 if __name__ == "__main__":
     
@@ -461,14 +474,8 @@ if __name__ == "__main__":
 
     print("Evaluate model...")
     score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
-    result = {"final":score}
 
     print("Evaluate ckpts...")
-    ckpt_dir = os.path.join("../log/",dir_name)
-    eval_data = datasets_load(dataset_name,split="validation")
-    for ckpt_name in next(os.walk(ckpt_dir))[1]:
-        ckpt_path = os.path.join(dir_name,ckpt_name)
-        score = ckpt_eval(ckpt_path,eval_data)
-        result[ckpt_name] = score
-    
+    result = eval_ckpts(dir_name,dataset_name,split="validation")
+    result['final':score]
     print(result)
