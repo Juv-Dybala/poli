@@ -2,10 +2,11 @@ import os
 import torch
 import transformers
 from transformers import AutoModelForCausalLM, AutoTokenizer, T5ForConditionalGeneration
+from transformers.pipelines.pt_utils import KeyDataset
 from peft import AutoPeftModelForCausalLM
 from datasets_load import datasets_load,math_datasets_load
 from data_process import model_download
-from pre_filter import extract_ar
+from pre_filter import extract_ar, get_math_prompt
 from refined_selection import q2a
 import time
 from tqdm import tqdm
@@ -16,6 +17,8 @@ import json
 # 对model利用valid/test数据集进行ACC的评测 
 
 def judge_answer(reply,true_answer):
+    print(reply)
+    print(true_answer)
     pattern_str = r"The correct answer is .*?\."
     whole_answer = re.search(pattern_str,reply)
     if not whole_answer:
@@ -29,14 +32,13 @@ def judge_answer(reply,true_answer):
 
 
 def judge_math_answer(reply,true_answer):
-    pattern_str = r"The correct answer is .*?\."
-    whole_answer = re.search(pattern_str,reply)
+    answerNum = reply.split("####")[-1]
+    whole_answer = re.search(r'\d+',answerNum)
     if not whole_answer:
         return False
-    whole_answer = whole_answer.group()[21:]
+    whole_answer = whole_answer.group()
     print(whole_answer)
-    # TODO: 增强对数字（不同格式、单位）的判断
-    return true_answer in whole_answer
+    return true_answer == whole_answer
 
 
 def inference_eval(model,tokenizer,eval_data,opinion = False):
@@ -48,7 +50,7 @@ def inference_eval(model,tokenizer,eval_data,opinion = False):
     lm = transformers.pipeline(task="text-generation",
                                model=model,
                                tokenizer=tokenizer)
-    print(lm.device)
+    
     # greedy decoding
     generate_config = {'do_sample':False,'eos_token_id':tokenizer.eos_token_id,
                        'max_new_tokens':200}
@@ -113,6 +115,58 @@ def inference_eval(model,tokenizer,eval_data,opinion = False):
     return result
 
 
+def inference_eval_speedup(model,tokenizer,eval_data,batch_size=32):
+
+    num_of_question = len(eval_data)
+    print(num_of_question)
+    result = {}
+    acc_count = 0
+
+    lm = transformers.pipeline(task="text-generation",
+                               model=model.half(),
+                               tokenizer=tokenizer,
+                               batch_size=batch_size)
+    print(lm.device)
+    # greedy decoding
+    generate_config = {'do_sample':False,'eos_token_id':tokenizer.eos_token_id,
+                       'max_new_tokens':200}
+    INPUT_PROMPT = "Question: {}. \nAnswer: The correct answer is "
+    def _process_dataset(item):
+        item['input'] = INPUT_PROMPT.format(item['formatted_question'])
+        answer_key = item['answerKey']
+        answer_text = item['choices']['text'][ord(answer_key)-ord('A')]
+        item['answer'] = [f"({answer_key})",answer_text]
+        return item
+
+    eval_data = eval_data.map(_process_dataset)
+    eval_data = eval_data.select_columns(['input','answer'])
+
+    num_of_batch = num_of_question // batch_size + (0 if num_of_question%batch_size==0 else 1)
+    pbar = tqdm(total=num_of_batch)
+    pbar.set_description("Evaluating...")
+
+    for i in range(num_of_batch):
+        batch = eval_data[i*batch_size:(i+1)*batch_size]
+        inputs = batch['input']
+        answers = batch['answer']
+        
+        outputs = lm(inputs,**generate_config)
+        for j in range(len(outputs)):
+            reply = outputs[j][0]['generated_text']
+            answer = answers[j]
+            reply = reply.split("Answer:")[1]
+            if judge_answer(reply,answer):
+                acc_count += 1
+                print("ANSWER PASS")
+            print("------------------")
+        
+        pbar.update(1)
+
+    result['ACC'] = acc_count / num_of_question
+    print(result)
+    return result
+
+
 def inference_eval_t5(model,tokenizer,eval_data):
 
     num_of_question = len(eval_data)
@@ -160,9 +214,10 @@ def ckpt_eval(ckpt_dir,eval_data):
     print("Evaluate model...")
     result = inference_eval(model,tokenizer,eval_data,opinion=False)
     print(f"dir:{ckpt_dir}  ACC:{result}")
+    return result
 
 
-def math_eval(model,tokenizer,eval_data):
+def math_eval(model,tokenizer,eval_data,n_shot=0):
     num_of_question = len(eval_data)
     print(num_of_question)
     result = {}
@@ -178,21 +233,28 @@ def math_eval(model,tokenizer,eval_data):
     with tqdm(total=num_of_question) as pbar:
         pbar.set_description("Evaluating...")
         acc_count = 0
-        INPUT_PROMPT = "Question: {}. \nAnswer: The correct answer is"
+        if n_shot > 0:
+            N_SHOT_PROMPT = get_math_prompt(n_shot)
+        else:
+            N_SHOT_PROMPT = ""
+            print(N_SHOT_PROMPT)
+        INPUT_PROMPT = "Question: {}. \nAnswer:"
         for item in eval_data:
-            input = INPUT_PROMPT.format(item['question'])
+            input = N_SHOT_PROMPT + INPUT_PROMPT.format(item['question'])
             
             # 用Greedy decoding
-            reply = lm(input, **generate_config)[0]['generated_text']
+            reply = lm(input, **generate_config)[0]['generated_text'][len(N_SHOT_PROMPT):]
+            reply = reply.split("Answer:")[1]
+            reply = reply.split("Question:")[0] #应对llm重复提问自己
             print("===============================")
             print(reply)
             answer = item['answerNum']
-            print(answer)
-            reply = reply.split("Answer:")[1]
+            print(f"True answerNum: {answer}")
+            
             if judge_math_answer(reply,answer):
                 acc_count += 1
                 print("ANSWER PASS")
-
+            
             pbar.update(1)
         result['ACC'] = acc_count / num_of_question
 
@@ -210,8 +272,6 @@ def base_model_eval(model_name,eval_data,math=False):
         model_download(model_name)
 
     tokenizer = AutoTokenizer.from_pretrained(model_save_directory)
-    # Needed for LLaMA tokenizer
-    # tokenizer.pad_token = tokenizer.eos_token
     if "t5" in model_name:
         model = T5ForConditionalGeneration.from_pretrained(model_save_directory).to("cuda")
         if math:
@@ -219,10 +279,12 @@ def base_model_eval(model_name,eval_data,math=False):
         else:    
             result = inference_eval_t5(model,tokenizer,eval_data)
     else:
+        # Needed for LLaMA tokenizer
+        tokenizer.pad_token = tokenizer.eos_token
         model = AutoModelForCausalLM.from_pretrained(model_save_directory,
                                                      device_map="auto")
         if math:
-            result = math_eval(model,tokenizer,eval_data)
+            result = math_eval(model,tokenizer,eval_data,n_shot=8)
         else:
             result = inference_eval(model,tokenizer,eval_data,opinion=False)
     print(f"Model:{model_name} ACC:{result}")
@@ -230,14 +292,17 @@ def base_model_eval(model_name,eval_data,math=False):
 
 if __name__ == "__main__":
     
-    model_name = "meta-llama/Llama-2-chat-7b-hf"
+    model_name = "meta-llama/Llama-2-7b-chat-hf"
     # model_name = "google/flan-t5-base"
     dataset_name = "qasc"
 
-    eval_data = datasets_load(dataset_name,split="validation")
+    eval_data = math_datasets_load("gsm8k","main",'test')
+    base_model_eval(model_name,eval_data,math=True)
 
+    exit()
+    eval_data = datasets_load(dataset_name,split="validation")
     # eval each ckpts in dir
-    dir_name = "../log/rerun-0.2"
+    dir_name = "../log/base-0.3_old_prompt"
     for ckpt_name in next(os.walk(dir_name))[1]:
         ckpt_path = os.path.join(dir_name,ckpt_name)
         ckpt_eval(ckpt_path,eval_data)

@@ -11,12 +11,13 @@ from transformers.data import default_data_collator
 from datasets import load_dataset
 import json
 import copy
-from eval import inference_eval
+from eval import inference_eval, ckpt_eval
 from datasets_load import datasets_load
 
 
 QUESTION_PROMPT = {
     "no_opinion": 
+        # "Question: {Question}. What do you think the answer is? Why? \n",
         "Question: {Question}. \n",
     "with_opinion": 
         "Question: {Question}. Opinion: I think the answer is ({Opinion}), what do you think about? Why? \n"
@@ -104,6 +105,12 @@ def parse_args():
         "--max_step",
         type=int,
         help="The max step of fine-tune."
+    )
+    parser.add_argument(
+        "--save_steps",
+        type=int,
+        default=500,
+        help="Save ckpts after these steps."
     )
     parser.add_argument(
         "--lr",
@@ -332,6 +339,7 @@ def train(model, tokenizer, dataset, log_dir,output_dir, args):
             learning_rate=args.lr,
             fp16=True,
             logging_steps=1,
+            save_steps=args.save_steps,
             output_dir=os.path.join("../log",log_dir),
             optim="paged_adamw_8bit",
             seed=args.seed,
@@ -385,6 +393,7 @@ def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
     result = inference_eval(model,tokenizer,eval_data,opinion)
     print("")
     print(result)
+    return result
     
 
 if __name__ == "__main__":
@@ -451,6 +460,15 @@ if __name__ == "__main__":
     
 
     print("Evaluate model...")
-    eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
-    
+    score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
+    result = {"final":score}
 
+    print("Evaluate ckpts...")
+    ckpt_dir = os.path.join("../log/",dir_name)
+    eval_data = datasets_load(dataset_name,split="validation")
+    for ckpt_name in next(os.walk(ckpt_dir))[1]:
+        ckpt_path = os.path.join(dir_name,ckpt_name)
+        score = ckpt_eval(ckpt_path,eval_data)
+        result[ckpt_name] = score
+    
+    print(result)
