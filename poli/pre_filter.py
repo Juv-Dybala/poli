@@ -253,6 +253,7 @@ def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, gro
         **generate_config
     )
     rationales = []
+    failed_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'].split("Answer:")[-1]
@@ -261,9 +262,11 @@ def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, gro
         
         if answer == ground_answer[0][1]:
             rationales.append(rationale)
+        elif answer != None:
+            failed_rationales.append([f"({answer})",rationale])
     
     # print("Generated {} rationales using opinion {}.".format(len(rationales),opinion_choice))
-    return rationales,answer_list
+    return rationales,answer_list,failed_rationales
 
 
 def answer_question(large_lm, tokenizer, question, ground_answer, generate_time):
@@ -276,6 +279,7 @@ def answer_question(large_lm, tokenizer, question, ground_answer, generate_time)
         **generate_config
     )
     rationales = []
+    failed_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'].split("Answer:")[-1]
@@ -284,9 +288,11 @@ def answer_question(large_lm, tokenizer, question, ground_answer, generate_time)
 
         if answer == ground_answer[0][1]:
             rationales.append(rationale)
+        elif answer != None:
+            failed_rationales.append([f"({answer})",rationale])
     
     # print("Generated {} rationales without opinion.".format(len(rationales)))
-    return rationales,answer_list
+    return rationales,answer_list,failed_rationales
 
 
 def statistic_failed_ar(large_lm,tokenizer, question, ground_answer, generate_time):
@@ -361,6 +367,7 @@ def answer_math_question(large_lm, tokenizer, question, ground_answer, generate_
                 **generate_config)
 
     rationales = []
+    failed_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'][len(N_SHOT_PROMPT):]
@@ -372,9 +379,11 @@ def answer_math_question(large_lm, tokenizer, question, ground_answer, generate_
 
         if answer == ground_answer:
             rationales.append(rationale)
+        elif answer != None:
+            failed_rationales.append([answer,rationale])
     
     # print("Generated {} rationales without opinion.".format(len(rationales)))
-    return rationales,answer_list
+    return rationales,answer_list,failed_rationales
 
 
 def using_opinion_generate_math_ar(large_lm, tokenizer, question, opinion_num, ground_answer, generate_time, n_shot):
@@ -391,6 +400,7 @@ def using_opinion_generate_math_ar(large_lm, tokenizer, question, opinion_num, g
                 **generate_config)
 
     rationales = []
+    falied_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'][len(N_SHOT_PROMPT):]
@@ -402,6 +412,8 @@ def using_opinion_generate_math_ar(large_lm, tokenizer, question, opinion_num, g
 
         if answer == ground_answer:
             rationales.append(rationale)
+        elif answer != None:
+            falied_rationales.append([answer,rationale])
     
     # print("Generated {} rationales using opinion {}.".format(len(rationales),opinion_num))
-    return rationales,answer_list
+    return rationales,answer_list,falied_rationales

@@ -441,10 +441,13 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
     os.makedirs(dir_name,exist_ok=True)
     if 'wo' in inference_num:
         fwo = open(os.path.join(dir_name,f"step1_wo{inference_num['wo']}.jsonl"),mode="a+")
+        fwo_failed = open(os.path.join(dir_name,f"step1_wo{inference_num['wo']}_failed.jsonl"),mode="a+")
     if 'right' in inference_num:
         fright = open(os.path.join(dir_name,f"step1_right{inference_num['right']}.jsonl"),mode="a+")
+        fright_failed = open(os.path.join(dir_name,f"step1_right{inference_num['right']}_failed.jsonl"),mode="a+")
     if 'wrong' in inference_num:
         fwrong = open(os.path.join(dir_name,f"step1_wrong{inference_num['wrong']}.jsonl"),mode="a+")
+        fwrong_failed = open(os.path.join(dir_name,f"step1_wrong{inference_num['wrong']}_failed.jsonl"),mode="a+")
 
     pass_count = {"wo":0,"right":0,"wrong":0}    
 
@@ -467,8 +470,8 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
 
         # without opinion
         if 'wo' in inference_num:
-            wo_rationales,wo_answers = answer_question(large_lm,tokenizer,question,ground_answer=answer,
-                                            generate_time=inference_num['wo'])
+            wo_rationales,wo_answers,failed_wo_rationales = answer_question(large_lm,tokenizer,
+                                question,ground_answer=answer,generate_time=inference_num['wo'])
             print(wo_answers)
             pass_count['wo'] += len(wo_rationales)
             print("Generate {} rationales without opinion.".format(len(wo_rationales)))
@@ -480,11 +483,16 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
                             "Answer":answer,
                             "Rationales":wo_rationales}
                 fwo.write(json.dumps(write_in, ensure_ascii=False) + "\n")
-        
+            if len(failed_wo_rationales):
+                write_in = {"Question":question,
+                            "Num of choice":num_of_choice,
+                            "True Answer":answer,
+                            "Rationales":failed_wo_rationales}
+                fwo_failed.write(json.dumps(write_in, ensure_ascii=False) + "\n")
         # true opinion
         if 'right' in inference_num:
-            right_rationales,right_answers = using_opinion_generate_ar(large_lm,tokenizer,question,opinion_choice=answer[0],
-                                                        ground_answer=answer,generate_time=inference_num['right'])
+            right_rationales,right_answers,failed_right_rationales = using_opinion_generate_ar(large_lm,tokenizer,
+                                question,opinion_choice=answer[0],ground_answer=answer,generate_time=inference_num['right'])
             print(right_answers)
             pass_count['right'] += len(right_rationales)
             print("Generate {} rationales using right opinion.".format(len(right_rationales)))
@@ -496,20 +504,28 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
                             "Answer":answer,
                             "Rationales":right_rationales}
                 fright.write(json.dumps(write_in, ensure_ascii=False) + "\n")
-        
+            if len(failed_right_rationales):
+                write_in = {"Question":question,
+                            "Num of choice":num_of_choice,
+                            "True Answer":answer,
+                            "Rationales":failed_right_rationales}
+                fright_failed.write(json.dumps(write_in, ensure_ascii=False) + "\n")
         # wrong opinion
         if 'wrong' in inference_num:
             wrong_rationales = []
             wrong_answers = []
+            failed_wrong_rationales = []
             generate_time = inference_num['wrong'] // (num_of_choice-1)
             for i in range(num_of_choice):
                 opinion_choice = chr(ord('A') + i)
                 if opinion_choice == answer[0][1]:
                     continue
-                rationales,answer_list = using_opinion_generate_ar(large_lm,tokenizer,question,opinion_choice=opinion_choice,
-                                                       ground_answer=answer,generate_time=generate_time)
+                rationales,answer_list,failed_rationales = using_opinion_generate_ar(
+                            large_lm,tokenizer,question,opinion_choice=opinion_choice,
+                            ground_answer=answer,generate_time=generate_time)
                 wrong_rationales += rationales
                 wrong_answers += answer_list
+                failed_wrong_rationales += failed_rationales
             print(wrong_answers)
             pass_count['wrong'] += len(wrong_rationales)
             print("Generate {} rationales using wrong opinion.".format(len(wrong_rationales)))
@@ -521,16 +537,25 @@ def step1_generate(large_lm_name,dataset_name,inference_num):
                             "Answer":answer,
                             "Rationales":wrong_rationales}
                 fwrong.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+            if len(failed_wrong_rationales):
+                write_in = {"Question":question,
+                            "Num of choice":num_of_choice,
+                            "True Answer":answer,
+                            "Rationales":failed_wrong_rationales}
+                fwrong_failed.write(json.dumps(write_in, ensure_ascii=False) + "\n")
         
         pbar.update(1)
     
     pbar.close()
     if 'wo' in inference_num:
         fwo.close()
+        fwo_failed.close()
     if 'right' in inference_num:
         fright.close()
+        fright_failed.close()
     if 'wrong' in inference_num:
         fwrong.close()
+        fwrong_failed.close()
 
     print(pass_count)
     
@@ -544,8 +569,10 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
     os.makedirs(dir_name,exist_ok=True)
     if 'wo' in inference_num:
         fwo = open(os.path.join(dir_name,f"step1_wo{inference_num['wo']}.jsonl"),mode="a+")
+        fwo_failed = open(os.path.join(dir_name,f"step1_wo{inference_num['wo']}_failed.jsonl"),mode="a+")
     if 'right' in inference_num:
         fright = open(os.path.join(dir_name,f"step1_right{inference_num['right']}.jsonl"),mode="a+")
+        fright_failed = open(os.path.join(dir_name,f"step1_right{inference_num['right']}_failed.jsonl"),mode="a+")
 
     pass_count = {"wo":0, "right":0}
 
@@ -564,8 +591,8 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
 
         # without opinion
         if 'wo' in inference_num:
-            wo_rationales,wo_answers = answer_math_question(large_lm,tokenizer,question,
-                                            ground_answer=answerNum,generate_time=inference_num['wo'],n_shot=8)
+            wo_rationales,wo_answers,failed_wo_rationales = answer_math_question(large_lm,tokenizer,
+                        question,ground_answer=answerNum,generate_time=inference_num['wo'],n_shot=8)
             print(wo_answers)
             pass_count['wo'] += len(wo_rationales)
             print("Generate {} rationales without opinion.".format(len(wo_rationales)))
@@ -576,11 +603,15 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
                             "Answer":answerNum,
                             "Rationales":wo_rationales}
                 fwo.write(json.dumps(write_in, ensure_ascii=False) + "\n")
-        
+            if len(failed_wo_rationales):
+                write_in = {"Question":question,
+                            "True Answer":answerNum,
+                            "Rationales":failed_wo_rationales}
+                fwo_failed.write(json.dumps(write_in, ensure_ascii=False) + "\n")
         # true opinion
         if 'right' in inference_num:
-            right_rationales,right_answers = using_opinion_generate_math_ar(large_lm,tokenizer,question,opinion_num=answerNum,
-                                                        ground_answer=answerNum,generate_time=inference_num['right'],n_shot=8)
+            right_rationales,right_answers,failed_right_rationales = using_opinion_generate_math_ar(large_lm,tokenizer,
+                        question,opinion_num=answerNum,ground_answer=answerNum,generate_time=inference_num['right'],n_shot=8)
             print(right_answers)
             pass_count['right'] += len(right_rationales)
             print("Generate {} rationales using right opinion.".format(len(right_rationales)))
@@ -591,7 +622,12 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
                             "Answer":answerNum,
                             "Rationales":right_rationales}
                 fright.write(json.dumps(write_in, ensure_ascii=False) + "\n")
-        
+            
+            if len(failed_right_rationales):
+                write_in = {"Question":question,
+                            "True Answer":answerNum,
+                            "Rationales":failed_right_rationales}
+                fright_failed.write(json.dumps(write_in, ensure_ascii=False) + "\n")
         # wrong opinion (todo)
         
         pbar.update(1)
@@ -599,8 +635,10 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
     pbar.close()
     if 'wo' in inference_num:
         fwo.close()
+        fwo_failed.close()
     if 'right' in inference_num:
         fright.close()
+        fright_failed.close()
 
     print(pass_count)
 
