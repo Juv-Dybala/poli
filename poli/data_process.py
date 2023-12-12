@@ -100,7 +100,7 @@ def load_llama(model_name):
     tokenizer = AutoTokenizer.from_pretrained(model_save_directory)
     model = AutoModelForCausalLM.from_pretrained(model_save_directory).to("cuda")
     print(model)
-    model = model.half()
+    # model = model.half()
     print(model.dtype)
     print("------------------------------------------------------")
     
@@ -565,7 +565,7 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
         # without opinion
         if 'wo' in inference_num:
             wo_rationales,wo_answers = answer_math_question(large_lm,tokenizer,question,
-                                            ground_answer=answerNum,generate_time=inference_num['wo'])
+                                            ground_answer=answerNum,generate_time=inference_num['wo'],n_shot=8)
             print(wo_answers)
             pass_count['wo'] += len(wo_rationales)
             print("Generate {} rationales without opinion.".format(len(wo_rationales)))
@@ -580,7 +580,7 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
         # true opinion
         if 'right' in inference_num:
             right_rationales,right_answers = using_opinion_generate_math_ar(large_lm,tokenizer,question,opinion_num=answerNum,
-                                                        ground_answer=answerNum,generate_time=inference_num['right'])
+                                                        ground_answer=answerNum,generate_time=inference_num['right'],n_shot=8)
             print(right_answers)
             pass_count['right'] += len(right_rationales)
             print("Generate {} rationales using right opinion.".format(len(right_rationales)))

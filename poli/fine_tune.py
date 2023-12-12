@@ -471,11 +471,10 @@ if __name__ == "__main__":
     print(model)
     tokenizer.save_pretrained(output_merged_dir)
     
-
     print("Evaluate model...")
     score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
 
     print("Evaluate ckpts...")
     result = eval_ckpts(dir_name,dataset_name,split="validation")
-    result['final':score]
+    result['final'] = score
     print(result)
