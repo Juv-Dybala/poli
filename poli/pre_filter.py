@@ -9,7 +9,7 @@ model_name = "meta-llama/Llama-2-7b-chat-hf"
 
 # sampling decoding
 generate_config = {'do_sample':True,'temperature':1.2,
-                   'max_new_tokens':200}
+                   'max_new_tokens':300}
 
 
 def self_consitency(answer_record):
@@ -51,12 +51,24 @@ def extract_ar(whole_answer):
 
 
 def extract_math_ar(whole_answer):
-    rationale,answer = whole_answer.split("####") 
-    answerNum = re.search(r'\d+',answer)
-    if not answerNum:
-        return rationale,None
-    answerNum = answerNum.group()
-    return answerNum,rationale
+    split_list = whole_answer.split("####")
+    if len(split_list) == 2:
+        rationale,answer = split_list
+        answerNum = re.search(r'\d+',answer)
+        if not answerNum:
+            return None,None
+        answerNum = answerNum.group()
+        return answerNum,rationale
+    else:
+        sentences = whole_answer.split(".")
+        for i in range(len(sentences)-1,-1,-1):
+            nums = re.findall(r'\d+',sentences[i])
+            if not nums:
+                continue
+            answerNum = nums[-1]
+            rationale = ".".join(sentences[:i+1])
+            return answerNum,rationale
+        return None,None 
 
 
 def ask_lm(lm,tokenizer,input,num_return_sequences,answer_record,rationale_sets):
@@ -241,6 +253,7 @@ def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, gro
         **generate_config
     )
     rationales = []
+    failed_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'].split("Answer:")[-1]
@@ -249,9 +262,11 @@ def using_opinion_generate_ar(large_lm, tokenizer, question, opinion_choice, gro
         
         if answer == ground_answer[0][1]:
             rationales.append(rationale)
+        elif answer != None:
+            failed_rationales.append([f"({answer})",rationale])
     
     # print("Generated {} rationales using opinion {}.".format(len(rationales),opinion_choice))
-    return rationales,answer_list
+    return rationales,answer_list,failed_rationales
 
 
 def answer_question(large_lm, tokenizer, question, ground_answer, generate_time):
@@ -264,6 +279,7 @@ def answer_question(large_lm, tokenizer, question, ground_answer, generate_time)
         **generate_config
     )
     rationales = []
+    failed_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'].split("Answer:")[-1]
@@ -272,9 +288,11 @@ def answer_question(large_lm, tokenizer, question, ground_answer, generate_time)
 
         if answer == ground_answer[0][1]:
             rationales.append(rationale)
+        elif answer != None:
+            failed_rationales.append([f"({answer})",rationale])
     
     # print("Generated {} rationales without opinion.".format(len(rationales)))
-    return rationales,answer_list
+    return rationales,answer_list,failed_rationales
 
 
 def statistic_failed_ar(large_lm,tokenizer, question, ground_answer, generate_time):
@@ -349,25 +367,28 @@ def answer_math_question(large_lm, tokenizer, question, ground_answer, generate_
                 **generate_config)
 
     rationales = []
+    failed_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'][len(N_SHOT_PROMPT):]
-        reply = reply.split("Answer:")[1]
-        reply = reply.split("Question:")[0] #应对llm重复提问自己
+        whole_answer = whole_answer.split("Answer:")[1]
+        whole_answer = whole_answer.split("Question:")[0] #应对llm重复提问自己
 
         answer,rationale = extract_math_ar(whole_answer)
         answer_list.append(answer)
 
         if answer == ground_answer:
             rationales.append(rationale)
+        elif answer != None:
+            failed_rationales.append([answer,rationale])
     
     # print("Generated {} rationales without opinion.".format(len(rationales)))
-    return rationales,answer_list
+    return rationales,answer_list,failed_rationales
 
 
 def using_opinion_generate_math_ar(large_lm, tokenizer, question, opinion_num, ground_answer, generate_time, n_shot):
     opinion = "I think the answer is {},what do you think about? Why?".format(opinion_num)
-    input = f"Question: {question}. Please think step by step.\nOpinion: {opinion}\nAnswer:"
+    input = f"Question: {question}.\nOpinion: {opinion} Please think step by step.\nAnswer:"
     if n_shot > 0:
         N_SHOT_PROMPT = get_math_prompt(n_shot)
     else:
@@ -379,17 +400,20 @@ def using_opinion_generate_math_ar(large_lm, tokenizer, question, opinion_num, g
                 **generate_config)
 
     rationales = []
+    falied_rationales = []
     answer_list = []
     for seq in reply:
         whole_answer = seq['generated_text'][len(N_SHOT_PROMPT):]
-        reply = reply.split("Answer:")[1]
-        reply = reply.split("Question:")[0] #应对llm重复提问自己
+        whole_answer = whole_answer.split("Answer:")[1]
+        whole_answer = whole_answer.split("Question:")[0] #应对llm重复提问自己
 
         answer,rationale = extract_math_ar(whole_answer)
         answer_list.append(answer)
 
         if answer == ground_answer:
             rationales.append(rationale)
+        elif answer != None:
+            falied_rationales.append([answer,rationale])
     
     # print("Generated {} rationales using opinion {}.".format(len(rationales),opinion_num))
-    return rationales,answer_list
+    return rationales,answer_list,falied_rationales

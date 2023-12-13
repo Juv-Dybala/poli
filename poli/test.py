@@ -5,6 +5,55 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
+small_model_name = "google/flan-t5-large"
+
+step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_large",threshold=-1)
+step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10_large",threshold=-1)
+# step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-base_wrong7",threshold=-1)
+
+# generate_ft_data(dataset_name,"step1_wo10")
+# generate_ft_data(dataset_name,"step1_right10")
+# merge_dataset(dir_list=["../data/finetuning/qasc/step1_wo10.jsonl",
+#                         "../data/finetuning/qasc/step1_right10.jsonl"],
+#                 merged_dir="../data/finetuning/qasc/step1_wo10+right10.jsonl")
+# generate_ft_data(dataset_name,"prob-0.25_wrong7")
+exit()
+step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
+
+step1_generate(large_model_name,dataset_name,inference_num={'wo':10,'right':10})
+
+
+
+
+
+statistic_failed_generation(large_model_name,small_model_name,dataset_name)
+
+select_best_worst(dataset_name,dir_name="prob-all_wo6")
+
+
+merge_dataset(['../data/finetuning/qasc/prob-0.25_wo6.jsonl',
+               '../data/finetuning/qasc/prob-0.25_right7.jsonl',
+               '../data/finetuning/qasc/prob-0.25_wrong7.jsonl'
+               ],
+               '../data/finetuning/qasc/prob-0.25.jsonl')
+
+
+
+
+
+question = "what can erosion cause? (A) hurricanes (B) h2o (C) Pollution (D) slow and inefficient (E) unstable terrain (F) Physical weathering (G) flooding (H) hydrogen"
+answer = ["(E)", "unstable terrain"]
+rationale = " Erosion can cause unstable terrain by removing the natural support systems of the land, such as vegetation and soil, which can lead to landslides, rockfalls, and other types of instability.\n This can have serious consequences, including loss of life and property damage.\n\nExplanation:\nErosion is the process of wearing away the Earth's surface by natural forces such as wind, water, or ice.\n It can cause a range of problems, including:\nUnstable terrain: Erosion can remove the natural support systems of the land, such as vegetation and soil, which can lead to landslides, rockfalls, and other types of instability.\n This can have serious consequences, including loss of life and property damage.\n\Hurricanes: Erosion can also contribute to the formation of hurricanes by weakening the structural integrity of the land.\n  When the land is weakened, it can be more susceptible to the strong winds and heavy rainfall associated with hurricanes, which can lead to further erosion and damage.\n\n   H2o: Erosion can also cause changes in the water table, which can lead to flooding and other hydrological problems.\n\nPollution: Erosion can also lead to the transport of pollutants, such as pesticides and fertilizers, which can contaminate waterways and harm aquatic ecosystems.\n\nSlow and inefficient: Erosion can also slow down and make inefficient the processes of nutrient cycling, water filtration, and other ecological processes that are essential for maintaining healthy ecosystems.\n\nPhysical weathering: Erosion can also cause physical weathering, which is the breakdown of rocks and soil into smaller particles.\n This can lead to changes in the landscape and can affect the stability of structures"
+model,tokenizer = load_t5(small_model_name)
+
+t = get_rationale_type(model,tokenizer,question,answer,rationale)
+print(t)
+
+q2a_prob = q2a(model,tokenizer,question,answer,prob=True)
+qr2a_prob = qr2a(model,tokenizer,question,answer,rationale,prob=True)
+
+print(q2a_prob)
+print(qr2a_prob)
 
 
 step1_generate(large_model_name,dataset_name,inference_num={'wrong':14})
@@ -14,13 +63,10 @@ step1_generate(large_model_name,dataset_name,inference_num={'wrong':14})
 # select_best_worst(dataset_name,"prob_base_wo6")
 exit()
 
-generate_ft_data(dataset_name,"prob_base_right7_-0.5filter")
-generate_ft_data(dataset_name,"prob_base_wo6_-0.5filter")
-generate_ft_data(dataset_name,"prob_base_wrong7_-0.5filter")
-merge_dataset([f"../data/finetuning/qasc/prob_base_right7_-0.5filter.jsonl",
-            f"../data/finetuning/qasc/prob_base_wrong7_-0.5filter.jsonl",
-            f"../data/finetuning/qasc/prob_base_wo6_-0.5filter.jsonl"],
-            merged_dir=f"../data/finetuning/qasc/base-0.5.jsonl")
+
+
+
+
 
 
 
