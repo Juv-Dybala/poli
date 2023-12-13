@@ -246,6 +246,35 @@ def filter_threshold(dataset_name, dir_name, threshold=-0.5):
     fout.close() 
 
 
+def filter_threshold_failed(dataset_name, dir_name, threshold=0.5):
+    # filter the rationale by reward threshold
+    out_dir = os.path.join("../data/processed",dataset_name,f"{dir_name}_{threshold}filter.jsonl")
+    fout = open(out_dir,mode="a+")
+    dir_path = os.path.join("../data/processed",dataset_name,f"{dir_name}.jsonl")
+
+    file = open(dir_path,'r',encoding='utf-8')
+    
+    for line in file.readlines():
+        item = json.loads(line)
+        rationales = item['Rationales']
+        passed = []
+        
+        for answer,rationale,reward in rationales:
+            if reward >= threshold:
+                passed.append([answer,rationale])
+        
+        if len(passed) == 0:
+            continue
+
+        write_in = {"Question":item['Question'],
+                    "Num of choice":item['Num of choice'],
+                    "True Answer":item['True Answer'],
+                    "Rationales":passed}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+
+    fout.close() 
+
+
 def select_best_worst(dataset_name, dir_name):
     best_dir = os.path.join("../data/finetuning",dataset_name,f"{dir_name}_best.jsonl")
     fbest = open(best_dir,mode="a+")

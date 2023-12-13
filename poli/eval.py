@@ -302,7 +302,7 @@ if __name__ == "__main__":
     exit()
     eval_data = datasets_load(dataset_name,split="validation")
     # eval each ckpts in dir
-    dir_name = "../log/base-0.3_old_prompt"
+    dir_name = "../log/SFT/large-0.2"
     for ckpt_name in next(os.walk(dir_name))[1]:
         ckpt_path = os.path.join(dir_name,ckpt_name)
         ckpt_eval(ckpt_path,eval_data)
