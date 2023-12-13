@@ -6,10 +6,12 @@ from datasets import load_dataset,DatasetDict
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
 
+
+step1_generate(large_model_name,dataset_name,inference_num={'wrong':14})
 # filter_threshold(dataset_name,"prob_base_wo6",-0.5)
 # filter_threshold(dataset_name,"prob_base_right7",-0.5)
 # filter_threshold(dataset_name,"prob_base_wrong7",-0.5)
-select_best_worst(dataset_name,"prob_base_wo6")
+# select_best_worst(dataset_name,"prob_base_wo6")
 exit()
 
 generate_ft_data(dataset_name,"prob_base_right7_-0.5filter")
