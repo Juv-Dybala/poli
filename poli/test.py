@@ -7,22 +7,28 @@ dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
 small_model_name = "google/flan-t5-large"
 
-step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_large",threshold=-1)
-step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10_large",threshold=-1)
+
+
+
+
+# step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_base",threshold=-1)
+# step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10_base",threshold=-1)
 # step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-base_wrong7",threshold=-1)
 
-# generate_ft_data(dataset_name,"step1_wo10")
-# generate_ft_data(dataset_name,"step1_right10")
-# merge_dataset(dir_list=["../data/finetuning/qasc/step1_wo10.jsonl",
-#                         "../data/finetuning/qasc/step1_right10.jsonl"],
-#                 merged_dir="../data/finetuning/qasc/step1_wo10+right10.jsonl")
-# generate_ft_data(dataset_name,"prob-0.25_wrong7")
+filter_threshold(dataset_name,"prob_right10_large",threshold=0.01)
+filter_threshold(dataset_name,"prob_wo10_large",threshold=0.01)
+generate_ft_data(dataset_name,"prob_right10_large_0.01filter")
+generate_ft_data(dataset_name,"prob_wo10_large_0.01filter")
+merge_dataset(dir_list=["../data/finetuning/qasc/prob_right10_large_0.01filter.jsonl",
+                        "../data/finetuning/qasc/prob_wo10_large_0.01filter.jsonl"],
+                merged_dir="../data/finetuning/qasc/large0.01.jsonl")
+
 exit()
 step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
+step1_generate(large_model_name,dataset_name,inference_num={'wo':10})
 
-step1_generate(large_model_name,dataset_name,inference_num={'wo':10,'right':10})
 
-
+generate_ft_data(dataset_name,"prob-0.25_wrong7")
 
 
 
