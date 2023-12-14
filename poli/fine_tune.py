@@ -305,7 +305,7 @@ def print_trainable_parameters(model, use_4bit=False):
         f"all params: {all_param:,d} || trainable params: {trainable_params:,d} || trainable%: {100 * trainable_params / all_param}"
     )
 
-def train(model, tokenizer, dataset, log_dir,output_dir, args):
+def train(model, tokenizer, dataset, log_dir, output_dir, args):
     # Apply preprocessing to the model to prepare it by
     # 1 - Enabling gradient checkpointing to reduce memory usage during fine-tuning
     model.gradient_checkpointing_enable()
@@ -340,7 +340,7 @@ def train(model, tokenizer, dataset, log_dir,output_dir, args):
             fp16=True,
             logging_steps=1,
             save_steps=args.save_steps,
-            output_dir=os.path.join("../log",log_dir),
+            output_dir=os.path.join("../log/SFT",log_dir),
             optim="paged_adamw_8bit",
             seed=args.seed,
         ),
@@ -399,7 +399,7 @@ def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
 
 def eval_ckpts(dir_name,dataset_name,split='validation'):
     result = {}
-    ckpt_dir = os.path.join("../log/",dir_name)
+    ckpt_dir = os.path.join("../log/SFT",dir_name)
     eval_data = datasets_load(dataset_name,split=split)
     
     for ckpt_name in next(os.walk(ckpt_dir))[1]:

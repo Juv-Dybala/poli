@@ -186,6 +186,14 @@ def load_ppo_data(dataset_name,dir_name):
     return dataset
 
 
+def load_dpo_data(dataset_name,dir_name):
+    # cols:'prompt','chosen','rejected',('score')
+    dataset_dir = os.path.join("../data/ppo",dataset_name,f"{dir_name}.jsonl")
+    dataset = load_dataset('json',data_files=dataset_dir)['train']
+    print(dataset)
+    return dataset
+
+
 def load_unformatted_data(dir_path):
     # 应对执行load_dataset时出错的情形，逐行读取
     # 出错主要在于rationale项混杂了str（rationale）和float（reward），无法生成dataset

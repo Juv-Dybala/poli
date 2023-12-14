@@ -61,10 +61,12 @@ qr2a_prob = qr2a(model,tokenizer,question,answer,rationale,prob=True)
 print(q2a_prob)
 print(qr2a_prob)
 
+
+step1_generate(large_model_name,dataset_name,inference_num={'wrong':14})
 # filter_threshold(dataset_name,"prob_base_wo6",-0.5)
 # filter_threshold(dataset_name,"prob_base_right7",-0.5)
 # filter_threshold(dataset_name,"prob_base_wrong7",-0.5)
-select_best_worst(dataset_name,"prob_base_wo6")
+# select_best_worst(dataset_name,"prob_base_wo6")
 exit()
 
 
