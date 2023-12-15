@@ -8,7 +8,39 @@ large_model_name = "meta-llama/Llama-2-7b-chat-hf"
 small_model_name = "google/flan-t5-large"
 
 
+# filter_threshold(dataset_name,"prob_right10_large",threshold=0.1)
+# filter_threshold(dataset_name,"prob_wo10_large",threshold=0.1)
+# join_processed_dataset(dataset_name,dir1="prob_wo10_large_0.1filter",
+#                         dir2="prob_right10_large_0.1filter",
+#                         joined_dir="prob_wo10+right10_large_0.1filter")
+# filter_threshold_failed(dataset_name,"prob_wo10_large_failed",threshold=-0.1)
+generate_dpo_data(dataset_name,chosen_dir="prob_wo10+right10_large_0.05filter",
+                  rejected_dir="prob_wo10_large_failed_-0.05filter",
+                  out_dir="wo+right_fwo_0.05filter")
+exit()
 
+
+
+# generate_ft_data(dataset_name,"prob_wo10+right10_large_0.2filter")
+
+# generate_ft_data(dataset_name,"prob_right10_large_0.2filter")
+# generate_ft_data(dataset_name,"prob_wo10_large_0.2filter")
+# merge_dataset(dir_list=["../data/finetuning/qasc/prob_right10_large_0.2filter.jsonl",
+#                         "../data/finetuning/qasc/prob_wo10_large_0.2filter.jsonl"],
+#                 merged_dir="../data/finetuning/qasc/large0.2.jsonl")
+# group_ft_data(dataset_name,"large0.01")
+# select_best_worst(dataset_name,"prob_right10_large")
+
+dataset1 = load_finetuning_data(dataset_name,"large0.01")
+dataset2 = load_finetuning_data(dataset_name,"prob_right10_large_best")
+dataset2 = dataset2.filter(lambda x:x["Rationale"] not in dataset1["Rationale"])
+print(len(dataset2))
+merge_dataset = concatenate_datasets([dataset1,dataset2])
+merge_dataset.to_json("../data/finetuning/qasc/large0.01+best.jsonl")
+
+
+
+step2_selection_prob_failed(dataset_name,"step1_wo10_failed",small_model_name,"prob_wo10_large_failed",threshold=1)
 
 
 # step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_base",threshold=-1)
@@ -17,13 +49,13 @@ small_model_name = "google/flan-t5-large"
 
 filter_threshold(dataset_name,"prob_right10_large",threshold=0.01)
 filter_threshold(dataset_name,"prob_wo10_large",threshold=0.01)
-generate_ft_data(dataset_name,"prob_right10_large_0.01filter")
-generate_ft_data(dataset_name,"prob_wo10_large_0.01filter")
-merge_dataset(dir_list=["../data/finetuning/qasc/prob_right10_large_0.01filter.jsonl",
-                        "../data/finetuning/qasc/prob_wo10_large_0.01filter.jsonl"],
-                merged_dir="../data/finetuning/qasc/large0.01.jsonl")
 
-exit()
+
+select_best_worst(dataset_name,dir_name="prob_right10_large")
+merge_dataset(["../data/finetuning/qasc/large0.01.jsonl",
+               "../data/finetuning/qasc/prob_right10_large_best.jsonl"],
+               merged_dir="../data/finetuning/qasc/large0.01+best.jsonl")
+
 step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
 step1_generate(large_model_name,dataset_name,inference_num={'wo':10})
 
@@ -34,7 +66,7 @@ generate_ft_data(dataset_name,"prob-0.25_wrong7")
 
 statistic_failed_generation(large_model_name,small_model_name,dataset_name)
 
-select_best_worst(dataset_name,dir_name="prob-all_wo6")
+
 
 
 merge_dataset(['../data/finetuning/qasc/prob-0.25_wo6.jsonl',

@@ -303,12 +303,11 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
         question = item['Question']
         golden_rationales = item["Rationales"]
         num_of_rationales = len(golden_rationales)
-        num_of_choice = item["Num of choice"]
         
         answer = item['Answer']
-        # 由于生成数据的代码版本不同，对数据进行规范化
-        num_of_choice = item['Num of choice']
+        # 由于生成数据的代码版本不同，对数据进行规范化   
         if not isinstance(answer,list):
+            num_of_choice = item['Num of choice']
             if answer != chr(ord('A')+num_of_choice-1):
                 pattern_str = f'\({answer}\)' + '.*?\('
                 answer_text = re.search(pattern_str,question).group()[4:-2]
@@ -327,6 +326,7 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
                             "Rationale":rationale}
                 fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
         elif not sycophancy:
+            num_of_choice = item['Num of choice']
             if num_of_choice + 1 >= num_of_rationales:
                 # w/o opinion
                 write_in = {"Question":question,
@@ -434,23 +434,30 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
     # 构建pair-wise data, 格式 prompt、chosen、rejected
     chosen_dataset = load_preprocessed_data(dataset_name,chosen_dir)
     rejected_dataset = load_preprocessed_data(dataset_name,rejected_dir)
+    os.makedirs(os.path.join("../data/dpo",dataset_name),exist_ok=True)
     fout = open(os.path.join("../data/dpo",dataset_name,f"{out_dir}.jsonl"),mode="a+")
     
     rejected_dataset = rejected_dataset.filter(lambda x: x['Question'] in chosen_dataset['Question'])
+    chosen_dataset = chosen_dataset.filter(lambda x: x['Question'] in rejected_dataset['Question'])
     def _join_dataset(item):
         item['Chosen Rationales'] = item['Rationales']
         rejected_item = rejected_dataset.filter(lambda x:x['Question'] == item["Question"])[0]
         item['Rejected Rationales'] = rejected_item['Rationales']
         return item
     joined_dataset = chosen_dataset.map(_join_dataset)
-    prob = isinstance(joined_dataset[0]['Rationales'],list)
+    prob = isinstance(joined_dataset[0]['Rationales'][0],list)
     ANSWER_PROMPT = "The correct answer is {}."
+    
+    print(f"{len(joined_dataset)} Questions to generate dpo pairs.")
+    print(joined_dataset)
     pbar = tqdm(total= len(joined_dataset))
     pbar.set_description("Generate dpo data...")
 
     for item in joined_dataset:
         question = item['Question']
-        true_answer = item['True Answer']
+        true_answer = item['Answer']
+        if isinstance(true_answer,list):
+            true_answer = " ".join(true_answer)
         chosen_rationales = item['Chosen Rationales']
         rejected_rationales = item['Rejected Rationales']
 
@@ -469,7 +476,6 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
 
                 if i < rejected_num:
                     rejected_answer,rejected_rationale,rejected_score = rejected_rationales[i]
-                    
                 else:
                     rejected_answer,rejected_rationale,rejected_score = random.choice(rejected_rationales)
                 rejected = ANSWER_PROMPT.format(rejected_answer) + rejected_rationale
@@ -490,8 +496,7 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
                 chosen = ANSWER_PROMPT.format(true_answer) + chosen
 
                 if i < rejected_num:
-                    rejected_answer,rejected_rationale = rejected_rationales[i]
-                    
+                    rejected_answer,rejected_rationale = rejected_rationales[i] 
                 else:
                     rejected_answer,rejected_rationale = random.choice(rejected_rationales)
                 rejected = ANSWER_PROMPT.format(rejected_answer) + rejected_rationale
@@ -926,7 +931,7 @@ def step2_selection_prob_failed(dataset_name,dir_name,small_lm_name,output,thres
 
         question = item['Question']
         print(question)
-        true_answer = item['Answer']
+        true_answer = item['True Answer']
         print(true_answer)
         assert isinstance(true_answer,list),"The type of true answer should be list."
 

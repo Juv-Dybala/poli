@@ -224,6 +224,7 @@ def filter_threshold(dataset_name, dir_name, threshold=-0.5):
     dir_path = os.path.join("../data/processed",dataset_name,f"{dir_name}.jsonl")
 
     file = open(dir_path,'r',encoding='utf-8')
+    count = 0
     
     for line in file.readlines():
         item = json.loads(line)
@@ -236,6 +237,7 @@ def filter_threshold(dataset_name, dir_name, threshold=-0.5):
         
         if len(passed) == 0:
             continue
+        count += len(passed)
 
         write_in = {"Question":item['Question'],
                     "Num of choice":item['Num of choice'],
@@ -243,7 +245,8 @@ def filter_threshold(dataset_name, dir_name, threshold=-0.5):
                     "Rationales":passed}
         fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
 
-    fout.close() 
+    fout.close()
+    print(f"{count} Rationales passed!") 
 
 
 def filter_threshold_failed(dataset_name, dir_name, threshold=0.5):
@@ -253,6 +256,7 @@ def filter_threshold_failed(dataset_name, dir_name, threshold=0.5):
     dir_path = os.path.join("../data/processed",dataset_name,f"{dir_name}.jsonl")
 
     file = open(dir_path,'r',encoding='utf-8')
+    count = 0
     
     for line in file.readlines():
         item = json.loads(line)
@@ -260,11 +264,12 @@ def filter_threshold_failed(dataset_name, dir_name, threshold=0.5):
         passed = []
         
         for answer,rationale,reward in rationales:
-            if reward >= threshold:
+            if reward <= threshold:
                 passed.append([answer,rationale])
         
         if len(passed) == 0:
             continue
+        count += len(passed)
 
         write_in = {"Question":item['Question'],
                     "Num of choice":item['Num of choice'],
@@ -272,7 +277,8 @@ def filter_threshold_failed(dataset_name, dir_name, threshold=0.5):
                     "Rationales":passed}
         fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
 
-    fout.close() 
+    fout.close()
+    print(f"{count} Rationales passed!") 
 
 
 def select_best_worst(dataset_name, dir_name):

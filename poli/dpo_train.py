@@ -9,12 +9,6 @@ import argparse
 from tqdm import tqdm
 from datasets_load import *
 from fine_tune import eval
-from pre_filter import extract_ar
-from refined_selection import q2a,qr2a
-from data_process import load_t5
-
-
-Q2A_PROMPT = "Question: {}. What do you think the answer is? Why? \nAnswer:"
 
 
 def parse_args():
@@ -38,22 +32,9 @@ def parse_args():
         help="The alias directory name."
     )
     parser.add_argument(
-        "--reward_model",
+        "--sft_dir",
         type=str,
-        default="google/flan-t5-small",
-        help="The name of reward model."
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        required=True,
-        help="Learning rate of fine-tune."
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        required=True,
-        help="Batch size of data."
+        help="The supervise fine-tune model directory."
     )
     parser.add_argument(
         "--max_length",
@@ -88,6 +69,47 @@ def parse_args():
         help="Dropout probability for layers in LoRA."
     )
     parser.add_argument(
+        "--batch_size",
+        type=int,
+        required=True,
+        help="Batch size of data."
+    )
+    parser.add_argument(
+        "--grad_acc_step",
+        type=int,
+        required=True,
+        help="Step of accumulate gradient."
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=-1,
+        help="Warm up steps."
+    )
+    parser.add_argument(
+        "--train_epoch",
+        type=int,
+        required=True,
+        help="The number of train epochs."
+    )
+    parser.add_argument(
+        "--max_step",
+        type=int,
+        help="The max step of fine-tune."
+    )
+    parser.add_argument(
+        "--save_steps",
+        type=int,
+        default=500,
+        help="Save ckpts after these steps."
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        required=True,
+        help="Learning rate of fine-tune."
+    )
+    parser.add_argument(
         "--eval_opinion",
         action="store_true",
         help="When evaluating on validation set, using with-opinion input."
@@ -95,7 +117,7 @@ def parse_args():
     return parser.parse_args()
 
     
-def build_dataset(dataset_name, dir_name, max_length, seed):
+def build_dataset(dataset_name, dir_name, seed):
     """Load the dataset
     The dataset is converted to a dictionary with the following structure:
     {
@@ -113,8 +135,6 @@ def build_dataset(dataset_name, dir_name, max_length, seed):
             "rejected": 'Answer: ' + sample['rejected'],
         }
     dataset = dataset.map(_data_process)
-    dataset = dataset.filter(lambda sample: len(sample["chosen"]) < max_length or
-                             len(sample['rejected']) < max_length)
     dataset = dataset.shuffle(seed=seed)
     return dataset
 
@@ -198,8 +218,10 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
     # default data_collator: DPODataCollatorWithPadding
     dpo_trainer = DPOTrainer(
         model=model,
-        model_ref=model_ref,
-        train_dataset=dataset['train'],
+        ref_model=model_ref,
+        tokenizer=tokenizer,
+        train_dataset=dataset,
+        max_length=args.max_length,
         args=TrainingArguments(
             per_device_train_batch_size=args.batch_size, # actual batch_size=micro_batch_size*grad_acc_step
             gradient_accumulation_steps=args.grad_acc_step, 
@@ -234,16 +256,15 @@ if __name__ == '__main__':
     model_name = args.model_name
     dataset_name = args.dataset
     dir_name = args.dir_name
-    reward_model_name = args.reward_model
+    sft_dir = args.sft_dir
 
     output_dir = os.path.join("../result/lora_model",dir_name)
     output_merged_dir = os.path.join("../result/dpo_model",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    pretrained_model_directory = os.path.join("../result/ckpt",dir_name)
-    
-    if os.path.exists(pretrained_model_directory):
-        model_save_directory = pretrained_model_directory
+    sft_model_directory = os.path.join("../result/ckpt",dir_name)
+    if os.path.exists(sft_model_directory):
+        model_save_directory = sft_model_directory
     else:
         model_save_directory = original_model_save_directory
 
@@ -253,7 +274,6 @@ if __name__ == '__main__':
         quantization_config=bnb_config,
         device_map = "auto"
         )
-
     model_ref = AutoModelForCausalLM.from_pretrained(
         model_save_directory,
         quantization_config=bnb_config,
@@ -262,13 +282,13 @@ if __name__ == '__main__':
     tokenizer = AutoTokenizer.from_pretrained(model_save_directory)
     tokenizer.pad_token = tokenizer.eos_token
 
-    dataset = build_dataset(dataset_name,dir_name,tokenizer,args.max_length,seed=args.seed)
+    dataset = build_dataset(dataset_name,dir_name,seed=args.seed)
     print(dataset)
 
-    model,tokenizer = dpo_train(model,tokenizer,dataset,dir_name,output_dir,args)
+    model,tokenizer = dpo_train(model, model_ref, tokenizer, dataset,
+                                log_dir=dir_name, output_dir=output_dir, args=args)
 
     os.makedirs(output_merged_dir,exist_ok=True)
-
     print("Merging LoRA and Saving model...")
     model = AutoPeftModelForCausalLM.from_pretrained(output_dir, device_map="auto", torch_dtype=torch.bfloat16)
     # 此处输入的是PEFT model的dir，base model的地址在dir内的config中记录了

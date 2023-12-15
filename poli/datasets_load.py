@@ -188,7 +188,7 @@ def load_ppo_data(dataset_name,dir_name):
 
 def load_dpo_data(dataset_name,dir_name):
     # cols:'prompt','chosen','rejected',('score')
-    dataset_dir = os.path.join("../data/ppo",dataset_name,f"{dir_name}.jsonl")
+    dataset_dir = os.path.join("../data/dpo",dataset_name,f"{dir_name}.jsonl")
     dataset = load_dataset('json',data_files=dataset_dir)['train']
     print(dataset)
     return dataset
@@ -291,5 +291,73 @@ def format_answer(dataset_name,dir_name):
                         "Answer":answer,
                         "Rationales":item['Rationales']}
         fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+    
+    fout.close()
+
+
+def group_ft_data(dataset_name,dir_name,out_dir=None):
+    # group（Q,A,R）ft data by question
+    dataset = load_finetuning_data(dataset_name,dir_name)
+    grouped_data = Dataset.from_dict({})
+    
+    for item in dataset:
+        question = item['Question']
+        answer = item['Answer']
+        if len(grouped_data) > 0 and question in grouped_data['Question']:
+            continue
+        filter_items = grouped_data.filter(lambda x: x['Question']==question)
+        rationales = []
+        for same_question_item in filter_items:
+            assert same_question_item['Answer']==answer ,"Answer must be the same!"
+            rationales.append(same_question_item['Rationale'])
+        write_in = {"Question":question,
+                    "Num of choice":item["Num of choice"],
+                    "Answer":answer,
+                    "Rationales":rationales}
+        grouped_data = grouped_data.add_item(write_in)
+    
+    print(grouped_data)
+    if out_dir:
+        grouped_data.to_json(os.path.join("../data/processed",dataset_name,f"{out_dir}.jsonl"))
+    return grouped_data
+
+
+def join_processed_dataset(dataset_name,dir1,dir2,joined_dir,outer_join=True):
+    dataset1 = load_preprocessed_data(dataset_name,dir1)
+    dataset2 = load_preprocessed_data(dataset_name,dir2)
+    fout = open(os.path.join("../data/processed",dataset_name,f"{joined_dir}.jsonl"),mode="a+")
+    
+    if outer_join:
+        for item in dataset1:
+            question = item["Question"]
+            answer = item["Answer"]
+            rationales = item["Rationales"]
+            same_question_item = dataset2.filter(lambda x:x["Question"]==question)
+            if len(same_question_item):
+                same_question_item = same_question_item[0]
+                assert same_question_item['Answer']==answer ,"Answer must be the same!"
+                rationales += same_question_item['Rationales']
+            write_in = {"Question":question,
+                        "Num of choice":item["Num of choice"],
+                        "Answer":answer,
+                        "Rationales":rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        for item in dataset2.filter(lambda x: x["Question"] not in dataset1["Question"]):
+            fout.write(json.dumps(dict(item), ensure_ascii=False) + "\n")          
+    else:    
+        dataset1 = dataset1.filter(lambda x: x['Question'] in dataset2['Question'])
+        dataset2 = dataset2.filter(lambda x: x['Question'] in dataset1['Question'])
+        for item in dataset1:
+            question = item["Question"]
+            answer = item["Answer"]
+            rationales = item["Rationales"]
+            same_question_item = dataset2.filter(lambda x:x["Question"]==question)[0]
+            assert same_question_item['Answer']==answer ,"Answer must be the same!"
+            rationales += same_question_item['Rationales']
+            write_in = {"Question":question,
+                        "Num of choice":item["Num of choice"],
+                        "Answer":answer,
+                        "Rationales":rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
     
     fout.close()
