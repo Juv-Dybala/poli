@@ -11,9 +11,6 @@ step1_generate_math(large_model_name,"gsm8k",inference_num={'wo':10,'right':10})
 
 exit()
 
-step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_large",threshold=-1)
-step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10_large",threshold=-1)
-# step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-base_wrong7",threshold=-1)
 
 # generate_ft_data(dataset_name,"step1_wo10")
 # generate_ft_data(dataset_name,"step1_right10")
@@ -22,17 +19,65 @@ step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10
 #                 merged_dir="../data/finetuning/qasc/step1_wo10+right10.jsonl")
 # generate_ft_data(dataset_name,"prob-0.25_wrong7")
 
+filter_threshold(dataset_name,"prob_right10_large",threshold=0.01)
+filter_threshold(dataset_name,"prob_wo10_large",threshold=0.01)
+
+
+select_best_worst(dataset_name,dir_name="prob_right10_large")
+merge_dataset(["../data/finetuning/qasc/large0.01.jsonl",
+               "../data/finetuning/qasc/prob_right10_large_best.jsonl"],
+               merged_dir="../data/finetuning/qasc/large0.01+best.jsonl")
+
 step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
 
-step1_generate(large_model_name,dataset_name,inference_num={'wo':10,'right':10})
 
 
+# generate_ft_data(dataset_name,"prob_wo10+right10_large_0.2filter")
+
+# generate_ft_data(dataset_name,"prob_right10_large_0.2filter")
+# generate_ft_data(dataset_name,"prob_wo10_large_0.2filter")
+# merge_dataset(dir_list=["../data/finetuning/qasc/prob_right10_large_0.2filter.jsonl",
+#                         "../data/finetuning/qasc/prob_wo10_large_0.2filter.jsonl"],
+#                 merged_dir="../data/finetuning/qasc/large0.2.jsonl")
+# group_ft_data(dataset_name,"large0.01")
+# select_best_worst(dataset_name,"prob_right10_large")
+
+dataset1 = load_finetuning_data(dataset_name,"large0.01")
+dataset2 = load_finetuning_data(dataset_name,"prob_right10_large_best")
+dataset2 = dataset2.filter(lambda x:x["Rationale"] not in dataset1["Rationale"])
+print(len(dataset2))
+merge_dataset = concatenate_datasets([dataset1,dataset2])
+merge_dataset.to_json("../data/finetuning/qasc/large0.01+best.jsonl")
+
+
+
+step2_selection_prob_failed(dataset_name,"step1_wo10_failed",small_model_name,"prob_wo10_large_failed",threshold=1)
+
+
+# step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_base",threshold=-1)
+# step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10_base",threshold=-1)
+# step2_selection_prob(dataset_name,"step1_wrong_0.5sample",small_model_name,"prob-base_wrong7",threshold=-1)
+
+filter_threshold(dataset_name,"prob_right10_large",threshold=0.01)
+filter_threshold(dataset_name,"prob_wo10_large",threshold=0.01)
+
+
+select_best_worst(dataset_name,dir_name="prob_right10_large")
+merge_dataset(["../data/finetuning/qasc/large0.01.jsonl",
+               "../data/finetuning/qasc/prob_right10_large_best.jsonl"],
+               merged_dir="../data/finetuning/qasc/large0.01+best.jsonl")
+
+step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
+step1_generate(large_model_name,dataset_name,inference_num={'wo':10})
+
+
+generate_ft_data(dataset_name,"prob-0.25_wrong7")
 
 
 
 statistic_failed_generation(large_model_name,small_model_name,dataset_name)
 
-select_best_worst(dataset_name,dir_name="prob-all_wo6")
+
 
 
 merge_dataset(['../data/finetuning/qasc/prob-0.25_wo6.jsonl',
@@ -59,10 +104,12 @@ qr2a_prob = qr2a(model,tokenizer,question,answer,rationale,prob=True)
 print(q2a_prob)
 print(qr2a_prob)
 
+
+step1_generate(large_model_name,dataset_name,inference_num={'wrong':14})
 # filter_threshold(dataset_name,"prob_base_wo6",-0.5)
 # filter_threshold(dataset_name,"prob_base_right7",-0.5)
 # filter_threshold(dataset_name,"prob_base_wrong7",-0.5)
-select_best_worst(dataset_name,"prob_base_wo6")
+# select_best_worst(dataset_name,"prob_base_wo6")
 exit()
 
 

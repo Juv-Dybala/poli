@@ -303,12 +303,11 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
         question = item['Question']
         golden_rationales = item["Rationales"]
         num_of_rationales = len(golden_rationales)
-        num_of_choice = item["Num of choice"]
         
         answer = item['Answer']
-        # 由于生成数据的代码版本不同，对数据进行规范化
-        num_of_choice = item['Num of choice']
+        # 由于生成数据的代码版本不同，对数据进行规范化   
         if not isinstance(answer,list):
+            num_of_choice = item['Num of choice']
             if answer != chr(ord('A')+num_of_choice-1):
                 pattern_str = f'\({answer}\)' + '.*?\('
                 answer_text = re.search(pattern_str,question).group()[4:-2]
@@ -327,6 +326,7 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
                             "Rationale":rationale}
                 fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
         elif not sycophancy:
+            num_of_choice = item['Num of choice']
             if num_of_choice + 1 >= num_of_rationales:
                 # w/o opinion
                 write_in = {"Question":question,
@@ -429,6 +429,88 @@ def generate_ppo_data(dataset_name, dir_name, reward_model_name):
     fout.close()
     print(count_reward)
     
+
+def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
+    # 构建pair-wise data, 格式 prompt、chosen、rejected
+    chosen_dataset = load_preprocessed_data(dataset_name,chosen_dir)
+    rejected_dataset = load_preprocessed_data(dataset_name,rejected_dir)
+    os.makedirs(os.path.join("../data/dpo",dataset_name),exist_ok=True)
+    fout = open(os.path.join("../data/dpo",dataset_name,f"{out_dir}.jsonl"),mode="a+")
+    
+    rejected_dataset = rejected_dataset.filter(lambda x: x['Question'] in chosen_dataset['Question'])
+    chosen_dataset = chosen_dataset.filter(lambda x: x['Question'] in rejected_dataset['Question'])
+    def _join_dataset(item):
+        item['Chosen Rationales'] = item['Rationales']
+        rejected_item = rejected_dataset.filter(lambda x:x['Question'] == item["Question"])[0]
+        item['Rejected Rationales'] = rejected_item['Rationales']
+        return item
+    joined_dataset = chosen_dataset.map(_join_dataset)
+    prob = isinstance(joined_dataset[0]['Rationales'][0],list)
+    ANSWER_PROMPT = "The correct answer is {}."
+    
+    print(f"{len(joined_dataset)} Questions to generate dpo pairs.")
+    print(joined_dataset)
+    pbar = tqdm(total= len(joined_dataset))
+    pbar.set_description("Generate dpo data...")
+
+    for item in joined_dataset:
+        question = item['Question']
+        true_answer = item['Answer']
+        if isinstance(true_answer,list):
+            true_answer = " ".join(true_answer)
+        chosen_rationales = item['Chosen Rationales']
+        rejected_rationales = item['Rejected Rationales']
+
+        if prob: # 根据prob值设计pair
+            # 先根据reward对rationale排序
+            chosen_rationales.sort(key=lambda x:x[-1],reverse=True) # 降序
+            rejected_rationales.sort(key=lambda x:x[-1],reverse=False) # 升序
+            chosen_num = len(chosen_rationales)
+            rejected_num = len(rejected_rationales)
+            for i in range(max(chosen_num,rejected_num)):
+                if i < chosen_num:
+                    chosen,chosen_score = chosen_rationales[i]
+                else:
+                    chosen,chosen_score = random.choice(chosen_rationales)
+                chosen = ANSWER_PROMPT.format(true_answer) + chosen
+
+                if i < rejected_num:
+                    rejected_answer,rejected_rationale,rejected_score = rejected_rationales[i]
+                else:
+                    rejected_answer,rejected_rationale,rejected_score = random.choice(rejected_rationales)
+                rejected = ANSWER_PROMPT.format(rejected_answer) + rejected_rationale
+
+                write_in = {'prompt':question,
+                            'chosen':chosen,
+                            'rejected':rejected,
+                            'score':chosen_score-rejected_score}
+                fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+        else: # 仅从chosen和rejected中各选一个组成pair
+            chosen_num = len(chosen_rationales)
+            rejected_num = len(rejected_rationales)
+            for i in range(max(chosen_num,rejected_num)):
+                if i < chosen_num:
+                    chosen = chosen_rationales[i]
+                else:
+                    chosen = random.choice(chosen_rationales)
+                chosen = ANSWER_PROMPT.format(true_answer) + chosen
+
+                if i < rejected_num:
+                    rejected_answer,rejected_rationale = rejected_rationales[i] 
+                else:
+                    rejected_answer,rejected_rationale = random.choice(rejected_rationales)
+                rejected = ANSWER_PROMPT.format(rejected_answer) + rejected_rationale
+            
+                write_in = {'prompt':question,
+                            'chosen':chosen,
+                            'rejected':rejected}
+                fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+
+        pbar.update(1)    
+    
+    pbar.close()
+    fout.close()
+
 
 def step1_generate(large_lm_name,dataset_name,inference_num):
     # inference_num 应为包含 wo(no_opinion)、right(right_opinion)、wrong(wrong_opinion)三项的dict
@@ -816,6 +898,71 @@ def step2_selection_prob(dataset_name,dir_name,small_lm_name,output,threshold=-1
         pbar.update(1)
     
 
+    pbar.close()
+    fout.close()
+    print(f"Total #rationale BEFORE: {total}")
+    print(f"Pass threshold rationale: {pass_count}")
+    # print(f"All prob lift data: {prob_lift_list}")
+    
+    # 统计 prob lift
+    plt.figure(figsize=(10,8),dpi=80)
+    sns.kdeplot(prob_lift_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
+    plt.savefig(output+".png")
+
+
+def step2_selection_prob_failed(dataset_name,dir_name,small_lm_name,output,threshold=1.0):
+    # 对回答失败数据进行处理，threshold为 上限
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
+    fout = open(output_dir,mode="a+")
+
+    # 通过率计算
+    total = 0
+    pass_count = 0
+    prob_lift_list = []
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    print("Select golden rationales. -------------------------------------")
+
+    for item in dataset:
+
+        question = item['Question']
+        print(question)
+        true_answer = item['True Answer']
+        print(true_answer)
+        assert isinstance(true_answer,list),"The type of true answer should be list."
+
+        q2a_prob = q2a(small_lm,small_tokenizer,question,true_answer,prob=True)
+        # print(q2a_prob)
+
+        pre_filter_rationales = item['Rationales']
+        total += len(pre_filter_rationales)
+        golden_rationales = []
+
+        for answer,rationale in pre_filter_rationales:
+            qr2a_prob = qr2a(small_lm,small_tokenizer,question,true_answer,rationale,prob=True)
+            prob_lift = qr2a_prob - q2a_prob
+            prob_lift_list.append(prob_lift)
+            print(f"The rationale lifted the {prob_lift} probility to answer correctly!")
+
+            if prob_lift <= threshold:
+                # golden_rationales.append(rationale) 
+                golden_rationales.append([answer,rationale,prob_lift])
+                pass_count += 1
+
+        print("After step2 selection,there are {} rationale(s) left.".format(len(golden_rationales)))
+        
+        if len(golden_rationales):
+            write_in = {"Question":question,
+                        "Num of choice":item['Num of choice'],
+                        "True Answer":answer,
+                        "Rationales":golden_rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        pbar.update(1)
+    
     pbar.close()
     fout.close()
     print(f"Total #rationale BEFORE: {total}")
