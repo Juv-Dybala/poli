@@ -5,7 +5,11 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "qasc"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-small_model_name = "google/flan-t5-large"
+small_model_name = "google/flan-t5-base"
+
+step1_generate_math(large_model_name,"gsm8k",inference_num={'wo':10,'right':10})
+
+exit()
 
 step2_selection_prob(dataset_name,"step1_wo10",small_model_name,"prob_wo10_large",threshold=-1)
 step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10_large",threshold=-1)
@@ -17,7 +21,7 @@ step2_selection_prob(dataset_name,"step1_right10",small_model_name,"prob_right10
 #                         "../data/finetuning/qasc/step1_right10.jsonl"],
 #                 merged_dir="../data/finetuning/qasc/step1_wo10+right10.jsonl")
 # generate_ft_data(dataset_name,"prob-0.25_wrong7")
-exit()
+
 step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
 
 step1_generate(large_model_name,dataset_name,inference_num={'wo':10,'right':10})
