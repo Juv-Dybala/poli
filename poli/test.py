@@ -3,11 +3,13 @@ from datasets_load import *
 from data_utils import *
 from datasets import load_dataset,DatasetDict
 
-dataset_name = "qasc"
+dataset_name = "gsm8k"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
 small_model_name = "google/flan-t5-base"
 
-step1_generate_math(large_model_name,"gsm8k",inference_num={'wo':10,'right':10})
+# step1_generate_math(large_model_name,"gsm8k",inference_num={'wo':10,'right':10})
+generate_ft_data_math(dataset_name,"step1_wo10")
+generate_ft_data_math(dataset_name,"step1_right10")
 
 exit()
 

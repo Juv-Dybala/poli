@@ -151,7 +151,7 @@ def load_gsm8k(subset='main',split='Train'):
     # features:['question','answer']
     def _process_data(item):
         rationale,answer = item['answer'].split("#### ")
-        item['answerNum'] = answer
+        item['answerNum'] = answer.replace(",","") # 去掉分位符
         return item
     dataset = dataset.map(_process_data)
     dataset = dataset.select_columns(['question','answerNum'])
