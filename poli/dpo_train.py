@@ -282,7 +282,7 @@ if __name__ == '__main__':
     output_merged_dir = os.path.join("../result/dpo_model",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    sft_model_directory = os.path.join("../result/sft_model",sft_dir)
+    sft_model_directory = os.path.join("../result/sft_model",dir_name)
     if os.path.exists(sft_model_directory):
         model_save_directory = sft_model_directory
     else:
@@ -322,3 +322,4 @@ if __name__ == '__main__':
     
     print("Evaluate model...")
     score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
+    print(score)
