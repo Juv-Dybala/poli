@@ -11,6 +11,7 @@ from tqdm import tqdm
 import random
 import matplotlib.pyplot as plt
 import seaborn as sns
+from collections import Counter
 
 
 def statistic_failed_generation(large_lm_name,small_lm_name,dataset_name):
@@ -308,3 +309,41 @@ def select_best_worst(dataset_name, dir_name):
 
     fbest.close()
     fworst.close()
+
+
+def statistic_voting(inference_num,wo_data,right_data,wrong_data):
+    assert len(wo_data) == len(right_data) and len(right_data) == len(wrong_data), \
+        "The num of questions should be the same!"
+    pbar = tqdm(total=len(wo_data))
+    pbar.set_description("Voting...")
+    acc_count = {'self_consistency':0,'step1':0}
+
+    def _get_voting_answer(answer_list):
+        counter = Counter(answer_list)
+        return counter.most_common(1)[0][0]
+
+    for i in range(len(wo_data)):
+        wo_list = wo_data[i]['wo list']
+        right_list = right_data[i]['right list']
+        wrong_list = wrong_data[i]['wrong list']
+        assert wo_data[i]['Answer']==right_data[i]['Answer'] and right_data[i]['Answer']==wrong_data[i]['Answer'], \
+            "The true answer must be the same!"
+        true_answer = wo_data[i]['Answer'][0][1]
+
+        self_consistency_list = random.choices(wo_list,k=inference_num['all'])
+        step1_list = random.choices(wo_list,k=inference_num['wo']) + \
+                    random.choices(right_list,k=inference_num['right']) + \
+                    random.choices(wrong_list,k=inference_num['wrong'])
+        sc_voting_answer = _get_voting_answer(self_consistency_list)
+        step1_voting_answer = _get_voting_answer(step1_list)
+        if sc_voting_answer == true_answer:
+            acc_count['self_consistency'] += 1
+        if step1_voting_answer == true_answer:
+            acc_count["step1"] += 1
+
+        pbar.update(1)
+    
+    pbar.close()
+    print(acc_count)
+    print(f"Voting ACC:  self-consistency: {acc_count['self_consistency']/len(wo_data)} step1: {acc_count['step1']/len(wo_data)}")
+        

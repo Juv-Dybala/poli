@@ -43,7 +43,13 @@ def parse_args():
     parser.add_argument(
         "--dir_name",
         type=str,
+        required=True,
         help="The alias directory name."
+    )
+    parser.add_argument(
+        "--pretrain_dir",
+        type=str,
+        help="The pretrain model directory."
     )
     parser.add_argument(
         "--max_length",
@@ -105,6 +111,12 @@ def parse_args():
         "--max_step",
         type=int,
         help="The max step of fine-tune."
+    )
+    parser.add_argument(
+        "--save_strategy",
+        type=str,
+        default="steps",
+        help="Save ckpts after each epoch or every n steps."
     )
     parser.add_argument(
         "--save_steps",
@@ -339,6 +351,7 @@ def train(model, tokenizer, dataset, log_dir, output_dir, args):
             learning_rate=args.lr,
             fp16=True,
             logging_steps=1,
+            save_strategy=args.save_strategy,
             save_steps=args.save_steps,
             output_dir=os.path.join("../log/SFT",log_dir),
             optim="paged_adamw_8bit",
@@ -416,18 +429,17 @@ if __name__ == "__main__":
     
     model_name = args.model_name
     dataset_name = args.dataset
-    if args.dir_name is not None:
-        dir_name = args.dir_name
-    else:
-        dir_name = dataset_name
+    dir_name = args.dir_name
+    pretrain_dir = args.pretrain_dir
 
-    output_dir = os.path.join("../result/lora_model",dir_name)
+    output_dir = os.path.join("../result/lora_model/sft",dir_name)
     os.makedirs(output_dir,exist_ok=True)
-    output_merged_dir = os.path.join("../result/ckpt",dir_name)
+    output_merged_dir = os.path.join("../result/sft_model",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    if os.path.exists(output_merged_dir):
-        model_save_directory = output_merged_dir
+    pretrain_model_directory = os.path.join("../result/sft_model",pretrain_dir)
+    if os.path.exists(pretrain_model_directory):
+        model_save_directory = pretrain_model_directory
     else:
         model_save_directory = original_model_save_directory
     print("dir:{}".format(model_save_directory))

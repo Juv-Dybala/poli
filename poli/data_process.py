@@ -430,8 +430,9 @@ def generate_ppo_data(dataset_name, dir_name, reward_model_name):
     print(count_reward)
     
 
-def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
+def generate_dpo_data_by_answer(dataset_name, chosen_dir, rejected_dir, out_dir):
     # 构建pair-wise data, 格式 prompt、chosen、rejected
+    # 利用不同的answer+rationale
     chosen_dataset = load_preprocessed_data(dataset_name,chosen_dir)
     rejected_dataset = load_preprocessed_data(dataset_name,rejected_dir)
     os.makedirs(os.path.join("../data/dpo",dataset_name),exist_ok=True)
@@ -446,8 +447,10 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
         return item
     joined_dataset = chosen_dataset.map(_join_dataset)
     prob = isinstance(joined_dataset[0]['Rationales'][0],list)
-    ANSWER_PROMPT = "The correct answer is {}."
-    
+    # ANSWER_PROMPT = "The correct answer is {}."
+    ANSWER_PROMPT = " {}."
+    QUESTION_PROMPT = "Question: {}.\nAnswer: The correct answer is"
+
     print(f"{len(joined_dataset)} Questions to generate dpo pairs.")
     print(joined_dataset)
     pbar = tqdm(total= len(joined_dataset))
@@ -455,6 +458,7 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
 
     for item in joined_dataset:
         question = item['Question']
+        prompt = QUESTION_PROMPT.format(question)
         true_answer = item['Answer']
         if isinstance(true_answer,list):
             true_answer = " ".join(true_answer)
@@ -480,7 +484,7 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
                     rejected_answer,rejected_rationale,rejected_score = random.choice(rejected_rationales)
                 rejected = ANSWER_PROMPT.format(rejected_answer) + rejected_rationale
 
-                write_in = {'prompt':question,
+                write_in = {'prompt':prompt,
                             'chosen':chosen,
                             'rejected':rejected,
                             'score':chosen_score-rejected_score}
@@ -501,7 +505,7 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
                     rejected_answer,rejected_rationale = random.choice(rejected_rationales)
                 rejected = ANSWER_PROMPT.format(rejected_answer) + rejected_rationale
             
-                write_in = {'prompt':question,
+                write_in = {'prompt':prompt,
                             'chosen':chosen,
                             'rejected':rejected}
                 fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
@@ -510,6 +514,49 @@ def generate_dpo_data(dataset_name, chosen_dir, rejected_dir, out_dir):
     
     pbar.close()
     fout.close()
+
+
+def generate_dpo_data_by_rationale(dataset_name, dir_name, gap=0.2):
+    # 构建pair-wise data, 格式 prompt、chosen、rejected
+    # 利用均回答正确，但rationale不同的data，必须带reward
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    assert 'Rewards' in dataset.column_names,"This function has to use rewards!"
+    fout = open(os.path.join("../data/dpo",dataset_name,f"{dir_name}_gap{gap}.jsonl"),mode="a+")
+
+    pbar = tqdm(total=len(dataset))
+    pbar.set_description("Generate dpo data...")
+    PROMPT = "Question: {Question}.\nAnswer: The correct answer is {Answer[0]} {Answer[1]}."
+
+    count_question = 0
+    for item in dataset:
+        prompt = PROMPT.format_map(item)
+        rationales = item['Rationales']
+        rewards = item['Rewards']
+        assert len(rationales)==len(rewards), "The num of rationales and rewards must be the same!"
+        
+        rationales_with_rewards = [[rationales[i],rewards[i]] for i in range((len(rationales)))]
+        rationales_with_rewards.sort(key=lambda x:x[1],reverse=True) # 根据rewards降序排序
+        count_pair = 0
+        for i in range(len(rationales)):
+            for j in range(i+1,len(rationales)):
+                if rationales_with_rewards[i][1] - rationales_with_rewards[j][1] >= gap:
+                    chosen = rationales_with_rewards[i][0]
+                    rejected = rationales_with_rewards[j][0]
+                    write_in = {'prompt':prompt,
+                                'chosen':chosen,
+                                'rejected':rejected}
+                    fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+                    count_pair += 1
+
+        if count_pair:
+            count_question += 1
+        # print(f"Generate {count_pair} pairs using {len(rationales)} rationales.")
+        pbar.update(1)
+    
+    print(f"{count_question} questions generated DPO pairs.")
+    pbar.close()
+    fout.close()
+
 
 
 def step1_generate(large_lm_name,dataset_name,inference_num):

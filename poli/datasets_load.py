@@ -2,6 +2,7 @@ import os
 from datasets import load_dataset,concatenate_datasets,Dataset
 import re
 import json
+import ast
 
 
 def dataset_download(dataset_name,subset=None):
@@ -197,15 +198,18 @@ def load_dpo_data(dataset_name,dir_name):
 def load_unformatted_data(dir_path):
     # 应对执行load_dataset时出错的情形，逐行读取
     # 出错主要在于rationale项混杂了str（rationale）和float（reward），无法生成dataset
-    # 处理时将reward去掉生成dataset
+    # 处理时将reward单独归为一项生成dataset
     file = open(dir_path,'r',encoding='utf-8')
     datas = []
     for line in file.readlines():
         dic = json.loads(line)
         rationales = []
+        rewards = []
         for rationale,reward in dic['Rationales']:
             rationales.append(rationale)
+            rewards.append(reward)
         dic['Rationales'] = rationales
+        dic['Rewards'] = rewards
         datas.append(dic)
     dataset = Dataset.from_list(datas)
     print(dataset)
@@ -326,21 +330,28 @@ def join_processed_dataset(dataset_name,dir1,dir2,joined_dir,outer_join=True):
     dataset1 = load_preprocessed_data(dataset_name,dir1)
     dataset2 = load_preprocessed_data(dataset_name,dir2)
     fout = open(os.path.join("../data/processed",dataset_name,f"{joined_dir}.jsonl"),mode="a+")
-    
+    has_reward = 'Rewards' in dataset1.column_names
+
     if outer_join:
         for item in dataset1:
             question = item["Question"]
             answer = item["Answer"]
             rationales = item["Rationales"]
+            if has_reward:
+                rewards = item['Rewards']
             same_question_item = dataset2.filter(lambda x:x["Question"]==question)
             if len(same_question_item):
                 same_question_item = same_question_item[0]
                 assert same_question_item['Answer']==answer ,"Answer must be the same!"
                 rationales += same_question_item['Rationales']
+                if has_reward:
+                    rewards += same_question_item['Rewards']
             write_in = {"Question":question,
                         "Num of choice":item["Num of choice"],
                         "Answer":answer,
                         "Rationales":rationales}
+            if has_reward:
+                write_in['Rewards'] = rewards
             fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
         for item in dataset2.filter(lambda x: x["Question"] not in dataset1["Question"]):
             fout.write(json.dumps(dict(item), ensure_ascii=False) + "\n")          
@@ -351,13 +362,74 @@ def join_processed_dataset(dataset_name,dir1,dir2,joined_dir,outer_join=True):
             question = item["Question"]
             answer = item["Answer"]
             rationales = item["Rationales"]
+            if has_reward:
+                rewards = item['Rewards']
             same_question_item = dataset2.filter(lambda x:x["Question"]==question)[0]
             assert same_question_item['Answer']==answer ,"Answer must be the same!"
             rationales += same_question_item['Rationales']
+            if has_reward:
+                    rewards += same_question_item['Rewards']
             write_in = {"Question":question,
                         "Num of choice":item["Num of choice"],
                         "Answer":answer,
                         "Rationales":rationales}
+            if has_reward:
+                write_in['Rewards'] = rewards
             fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
     
     fout.close()
+
+
+def load_inference_log(log_dir,inference_keys=[],out_dir=None):
+    file = open(log_dir,mode="r")
+    num_of_answerlist = len(inference_keys)
+    log_dataset = Dataset.from_dict({})
+    item = {}
+    current_state = -2
+    # state表示：-2为即将读取====，-1为即将读取问题，0为即将读取正确答案
+    # n为即将读取 answerlist第n个
+
+    def _is_list(text):
+        try:
+            obj = ast.literal_eval(text)
+            if isinstance(obj,list):
+                return True
+        except:
+            pass
+        return False
+
+    for line in file:
+        text = line.strip()
+        if current_state == -2 and text.startswith("==============="):
+            item = {}
+            current_state = -1
+        elif current_state == -1 and text.startswith("Question:"):
+            item['Question'] = text.replace("Question: ","")
+            current_state = 0
+        elif current_state == 0 and _is_list(text):
+            item['Answer'] = ast.literal_eval(text)
+            current_state = 1
+        elif current_state > 0 and _is_list(text):
+            item[f'{inference_keys[current_state-1]} list'] = ast.literal_eval(text)
+            current_state += 1
+            if current_state == num_of_answerlist + 1:
+                log_dataset = log_dataset.add_item(item)
+                current_state = -2
+        else:
+            continue
+    
+    print(log_dataset)
+    if out_dir:
+        log_dataset.to_json(out_dir)
+    return log_dataset
+
+
+def load_dataset_by_line(dir_path):
+    file = open(dir_path,'r',encoding='utf-8')
+    datas = []
+    for line in file.readlines():
+        dic = json.loads(line)
+        datas.append(dic)
+    dataset = Dataset.from_list(datas)
+    print(dataset)
+    return dataset

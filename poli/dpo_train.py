@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument(
         "--dir_name",
         type=str,
+        required=True,
         help="The alias directory name."
     )
     parser.add_argument(
@@ -49,6 +50,12 @@ def parse_args():
         required=True,
         default=42,
         help="Random seed when shuffle the data and init training."
+    )
+    parser.add_argument(
+        "--beta",
+        type=float,
+        default=0.1,
+        help="Temperature of DPO, the less beta is, the more we ignore ref-model."
     )
     parser.add_argument(
         "--lora_r",
@@ -98,6 +105,12 @@ def parse_args():
         help="The max step of fine-tune."
     )
     parser.add_argument(
+        "--save_strategy",
+        type=str,
+        default="steps",
+        help="Save ckpts after each epoch or every n steps."
+    )
+    parser.add_argument(
         "--save_steps",
         type=int,
         default=500,
@@ -128,13 +141,13 @@ def build_dataset(dataset_name, dir_name, seed):
     """
     dataset = load_dpo_data(dataset_name,dir_name)
 
-    def _data_process(sample):
-        return {
-            "prompt": 'Question:' + sample['prompt'],
-            "chosen": 'Answer: ' + sample['chosen'],
-            "rejected": 'Answer: ' + sample['rejected'],
-        }
-    dataset = dataset.map(_data_process)
+    # def _data_process(sample):
+    #     return {
+    #         "prompt": sample['prompt'],
+    #         "chosen": sample['chosen'],
+    #         "rejected": sample['rejected'],
+    #     }
+    # dataset = dataset.map(_data_process)
     dataset = dataset.shuffle(seed=seed)
     return dataset
 
@@ -205,6 +218,7 @@ def print_trainable_parameters(model, use_4bit=False):
 
 def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
 
+    model.config.use_cache = False
     model.gradient_checkpointing_enable()
     model = prepare_model_for_kbit_training(model)
     modules = find_all_linear_names(model)
@@ -222,6 +236,7 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
         tokenizer=tokenizer,
         train_dataset=dataset,
         max_length=args.max_length,
+        beta=args.beta,
         args=TrainingArguments(
             per_device_train_batch_size=args.batch_size, # actual batch_size=micro_batch_size*grad_acc_step
             gradient_accumulation_steps=args.grad_acc_step, 
@@ -231,6 +246,7 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
             learning_rate=args.lr,
             fp16=True,
             logging_steps=1,
+            save_strategy=args.save_strategy,
             save_steps=args.save_steps,
             output_dir=os.path.join("../log/DPO",log_dir),
             optim="paged_adamw_8bit",
@@ -245,6 +261,10 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
     dpo_trainer.model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
+    # Free memory for merging weights
+    del dpo_trainer
+    torch.cuda.empty_cache()
+
     return model,tokenizer
 
 
@@ -258,16 +278,17 @@ if __name__ == '__main__':
     dir_name = args.dir_name
     sft_dir = args.sft_dir
 
-    output_dir = os.path.join("../result/lora_model",dir_name)
+    output_dir = os.path.join("../result/lora_model/dpo",dir_name)
     output_merged_dir = os.path.join("../result/dpo_model",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    sft_model_directory = os.path.join("../result/ckpt",dir_name)
+    sft_model_directory = os.path.join("../result/sft_model",sft_dir)
     if os.path.exists(sft_model_directory):
         model_save_directory = sft_model_directory
     else:
         model_save_directory = original_model_save_directory
 
+    print(model_save_directory)
     bnb_config = create_bnb_config()
     model = AutoModelForCausalLM.from_pretrained(
         model_save_directory,
