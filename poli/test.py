@@ -5,32 +5,19 @@ from datasets import load_dataset,DatasetDict
 
 dataset_name = "gsm8k"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
-small_model_name = "google/flan-t5-base"
+small_model_name = "google/flan-t5-large"
 
-# step1_generate_math(large_model_name,"gsm8k",inference_num={'wo':10,'right':10})
-generate_ft_data_math(dataset_name,"step1_wo10")
-generate_ft_data_math(dataset_name,"step1_right10")
 
+# filter_threshold(dataset_name,"prob_right10_large",threshold=0.1)
+# filter_threshold(dataset_name,"prob_wo10_large",threshold=0.1)
+# join_processed_dataset(dataset_name,dir1="prob_wo10_large_0.1filter",
+#                         dir2="prob_right10_large_0.1filter",
+#                         joined_dir="prob_wo10+right10_large_0.1filter")
+# filter_threshold_failed(dataset_name,"prob_wo10_large_failed",threshold=-0.1)
+generate_dpo_data(dataset_name,chosen_dir="prob_wo10+right10_large_0.05filter",
+                  rejected_dir="prob_wo10_large_failed_-0.05filter",
+                  out_dir="wo+right_fwo_0.05filter")
 exit()
-
-
-# generate_ft_data(dataset_name,"step1_wo10")
-# generate_ft_data(dataset_name,"step1_right10")
-# merge_dataset(dir_list=["../data/finetuning/qasc/step1_wo10.jsonl",
-#                         "../data/finetuning/qasc/step1_right10.jsonl"],
-#                 merged_dir="../data/finetuning/qasc/step1_wo10+right10.jsonl")
-# generate_ft_data(dataset_name,"prob-0.25_wrong7")
-
-filter_threshold(dataset_name,"prob_right10_large",threshold=0.01)
-filter_threshold(dataset_name,"prob_wo10_large",threshold=0.01)
-
-
-select_best_worst(dataset_name,dir_name="prob_right10_large")
-merge_dataset(["../data/finetuning/qasc/large0.01.jsonl",
-               "../data/finetuning/qasc/prob_right10_large_best.jsonl"],
-               merged_dir="../data/finetuning/qasc/large0.01+best.jsonl")
-
-step1_generate(large_model_name,dataset_name,inference_num={'wrong':21})
 
 
 

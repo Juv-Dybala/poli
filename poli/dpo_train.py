@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument(
         "--dir_name",
         type=str,
+        required=True,
         help="The alias directory name."
     )
     parser.add_argument(
@@ -104,6 +105,12 @@ def parse_args():
         help="The max step of fine-tune."
     )
     parser.add_argument(
+        "--save_strategy",
+        type=str,
+        default="steps",
+        help="Save ckpts after each epoch or every n steps."
+    )
+    parser.add_argument(
         "--save_steps",
         type=int,
         default=500,
@@ -134,13 +141,13 @@ def build_dataset(dataset_name, dir_name, seed):
     """
     dataset = load_dpo_data(dataset_name,dir_name)
 
-    def _data_process(sample):
-        return {
-            "prompt": 'Question:' + sample['prompt'] + '\nAnswer: The correct answer is',
-            "chosen": sample['chosen'][21:],
-            "rejected": sample['rejected'][21:],
-        }
-    dataset = dataset.map(_data_process)
+    # def _data_process(sample):
+    #     return {
+    #         "prompt": sample['prompt'],
+    #         "chosen": sample['chosen'],
+    #         "rejected": sample['rejected'],
+    #     }
+    # dataset = dataset.map(_data_process)
     dataset = dataset.shuffle(seed=seed)
     return dataset
 
@@ -239,6 +246,7 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
             learning_rate=args.lr,
             fp16=True,
             logging_steps=1,
+            save_strategy=args.save_strategy,
             save_steps=args.save_steps,
             output_dir=os.path.join("../log/DPO",log_dir),
             optim="paged_adamw_8bit",
@@ -274,7 +282,7 @@ if __name__ == '__main__':
     output_merged_dir = os.path.join("../result/dpo_model",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    sft_model_directory = os.path.join("../result/ckpt",sft_dir)
+    sft_model_directory = os.path.join("../result/sft_model",dir_name)
     if os.path.exists(sft_model_directory):
         model_save_directory = sft_model_directory
     else:

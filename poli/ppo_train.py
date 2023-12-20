@@ -300,7 +300,7 @@ if __name__ == '__main__':
     output_dir = os.path.join("../result/ppo_model",dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    pretrained_model_directory = os.path.join("../result/ckpt",dir_name)
+    pretrained_model_directory = os.path.join("../result/sft_model",dir_name)
     
     if os.path.exists(pretrained_model_directory):
         model_save_directory = pretrained_model_directory
