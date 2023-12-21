@@ -12,7 +12,7 @@ python ../poli/fine_tune.py \
     --train_epoch 2 \
     --save_steps 400 \
     --lr 3e-4 \
-    --dir_name "step1_wo10+right10" \
+    --dir_name "large-0.2" \
     
     # --max_step 20 \
     # --eval_opinion

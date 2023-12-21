@@ -14,7 +14,7 @@ python ../poli/dpo_train.py \
     --save_steps 400 \
     --lr 3e-4 \
     --sft_dir "large-0.4" \
-    --dir_name "wo+right_fwo_0.1filter" \
+    --dir_name "wo+right_fwo_all" \
     
     # --max_step 20 \
     # --eval_opinion
