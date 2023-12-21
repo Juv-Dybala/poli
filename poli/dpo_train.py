@@ -8,7 +8,9 @@ import os
 import argparse
 from tqdm import tqdm
 from datasets_load import *
-from fine_tune import eval
+from fine_tune import eval,eval_math
+from eval import ckpt_eval
+import wandb
 
 
 def parse_args():
@@ -25,6 +27,11 @@ def parse_args():
         type=str,
         required=True,
         help="The name of dataset. Using train subset to fine-tune and validation subset to eval."
+    )
+    parser.add_argument(
+        "--math",
+        action="store_true",
+        help="Whether dpo on math problem datdaset."
     )
     parser.add_argument(
         "--dir_name",
@@ -248,7 +255,7 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
             logging_steps=1,
             save_strategy=args.save_strategy,
             save_steps=args.save_steps,
-            output_dir=os.path.join("../log/DPO",log_dir),
+            output_dir=os.path.join("../log/DPO",args.dataset,log_dir),
             optim="paged_adamw_8bit",
             seed=args.seed,
         ),
@@ -268,6 +275,30 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
     return model,tokenizer
 
 
+def eval_ckpts(dir_name,dataset_name,split='validation'):
+    result = {}
+    ckpt_dir = os.path.join("../log/DPO",dataset_name,dir_name)
+    eval_data = datasets_load(dataset_name,split=split)
+    
+    for ckpt_name in next(os.walk(ckpt_dir))[1]:
+        ckpt_path = os.path.join(ckpt_dir,ckpt_name)
+        score = ckpt_eval(ckpt_path,eval_data)
+        result[ckpt_name] = score
+    return result
+
+
+def eval_math_ckpts(dir_name,dataset_name,subset='main',split='test'):
+    result = {}
+    ckpt_dir = os.path.join("../log/DPO",dataset_name,dir_name)
+    eval_data = math_datasets_load(dataset_name,subset=subset,split=split)
+    
+    for ckpt_name in next(os.walk(ckpt_dir))[1]:
+        ckpt_path = os.path.join(ckpt_dir,ckpt_name)
+        score = ckpt_eval(ckpt_path,eval_data,math=True)
+        result[ckpt_name] = score
+    return result
+
+
 if __name__ == '__main__':
 
     args = parse_args()
@@ -278,11 +309,11 @@ if __name__ == '__main__':
     dir_name = args.dir_name
     sft_dir = args.sft_dir
 
-    output_dir = os.path.join("../result/lora_model/dpo",dir_name)
-    output_merged_dir = os.path.join("../result/dpo_model",dir_name)
+    output_dir = os.path.join("../result/lora_model/dpo",dataset_name,dir_name)
+    output_merged_dir = os.path.join("../result/dpo_model",dataset_name,dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    sft_model_directory = os.path.join("../result/sft_model",dir_name)
+    sft_model_directory = os.path.join("../result/sft_model",dataset_name,dir_name)
     if os.path.exists(sft_model_directory):
         model_save_directory = sft_model_directory
     else:
@@ -306,6 +337,7 @@ if __name__ == '__main__':
     dataset = build_dataset(dataset_name,dir_name,seed=args.seed)
     print(dataset)
 
+    wandb.init(project="dpo")
     model,tokenizer = dpo_train(model, model_ref, tokenizer, dataset,
                                 log_dir=dir_name, output_dir=output_dir, args=args)
 
@@ -321,5 +353,15 @@ if __name__ == '__main__':
     tokenizer.save_pretrained(output_merged_dir)
     
     print("Evaluate model...")
-    score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
-    print(score)
+    if args.math:
+        score = eval_math(model,tokenizer,dataset_name,subset='main',split='test')
+    else:
+        score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
+
+    print("Evaluate ckpts...")
+    if args.math:
+        result = eval_math_ckpts(dir_name,dataset_name,subset='main',split='test')
+    else:
+        result = eval_ckpts(dir_name,dataset_name,split="validation")
+    result['final'] = score
+    print(result)

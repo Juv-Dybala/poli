@@ -56,6 +56,7 @@ def parse_args():
     parser.add_argument(
         "--pretrain_dir",
         type=str,
+        default="",
         help="The pretrain model directory."
     )
     parser.add_argument(
@@ -364,7 +365,7 @@ def train(model, tokenizer, dataset, log_dir, output_dir, args):
             logging_steps=1,
             save_strategy=args.save_strategy,
             save_steps=args.save_steps,
-            output_dir=os.path.join("../log/SFT",log_dir),
+            output_dir=os.path.join("../log/SFT",args.dataset,log_dir),
             optim="paged_adamw_8bit",
             seed=args.seed,
         ),
@@ -423,7 +424,7 @@ def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
 
 def eval_ckpts(dir_name,dataset_name,split='validation'):
     result = {}
-    ckpt_dir = os.path.join("../log/SFT",dir_name)
+    ckpt_dir = os.path.join("../log/SFT",dataset_name,dir_name)
     eval_data = datasets_load(dataset_name,split=split)
     
     for ckpt_name in next(os.walk(ckpt_dir))[1]:
@@ -446,7 +447,7 @@ def eval_math(model, tokenizer, dataset_name, subset='math', split='test'):
 
 def eval_math_ckpts(dir_name,dataset_name,subset='main',split='test'):
     result = {}
-    ckpt_dir = os.path.join("../log/SFT",dir_name)
+    ckpt_dir = os.path.join("../log/SFT",dataset_name,dir_name)
     eval_data = math_datasets_load(dataset_name,subset=subset,split=split)
     
     for ckpt_name in next(os.walk(ckpt_dir))[1]:
@@ -466,12 +467,12 @@ if __name__ == "__main__":
     dir_name = args.dir_name
     pretrain_dir = args.pretrain_dir
 
-    output_dir = os.path.join("../result/lora_model/sft",dir_name)
+    output_dir = os.path.join("../result/lora_model/sft",dataset_name,dir_name)
     os.makedirs(output_dir,exist_ok=True)
-    output_merged_dir = os.path.join("../result/sft_model",dir_name)
+    output_merged_dir = os.path.join("../result/sft_model",dataset_name,dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    pretrain_model_directory = os.path.join("../result/sft_model",pretrain_dir)
+    pretrain_model_directory = os.path.join("../result/sft_model",dataset_name,pretrain_dir)
     if os.path.exists(pretrain_model_directory):
         model_save_directory = pretrain_model_directory
     else:

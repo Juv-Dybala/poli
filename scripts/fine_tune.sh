@@ -14,7 +14,8 @@ python ../poli/fine_tune.py \
     --save_strategy 'epoch' \
     --save_steps 400 \
     --lr 3e-4 \
-    --dir_name "step1_wo10" \
+    --pretrain_dir "" \
+    --dir_name "step1_wo10+right10" \
     
     # --max_step 20 \
     # --eval_opinion
