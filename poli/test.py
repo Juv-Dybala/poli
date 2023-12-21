@@ -3,32 +3,23 @@ from datasets_load import *
 from data_utils import *
 from datasets import load_dataset,DatasetDict
 
-dataset_name = "qasc"
+dataset_name = "gsm8k"
 large_model_name = "meta-llama/Llama-2-7b-chat-hf"
 small_model_name = "google/flan-t5-large"
 
-# join_processed_dataset(dataset_name,dir1="prob_wo10_large",
-#                        dir2="prob_right10_large",
-#                        joined_dir="prob_wo10+right10_large",outer_join=True)
-generate_dpo_data_by_rationale(dataset_name,dir_name="prob_wo10+right10_large",gap=0.2)
+
+# filter_threshold(dataset_name,"prob_right10_large",threshold=0.1)
+# filter_threshold(dataset_name,"prob_wo10_large",threshold=0.1)
+# join_processed_dataset(dataset_name,dir1="prob_wo10_large_0.1filter",
+#                         dir2="prob_right10_large_0.1filter",
+#                         joined_dir="prob_wo10+right10_large_0.1filter")
+# filter_threshold_failed(dataset_name,"prob_wo10_large_failed",threshold=-0.1)
+generate_dpo_data(dataset_name,chosen_dir="prob_wo10+right10_large_0.05filter",
+                  rejected_dir="prob_wo10_large_failed_-0.05filter",
+                  out_dir="wo+right_fwo_0.05filter")
 exit()
-filter_threshold(dataset_name,"prob_right10_large",threshold=-1)
-filter_threshold(dataset_name,"prob_wo10_large",threshold=-1)
-join_processed_dataset(dataset_name,dir1="prob_wo10_large_-1filter",
-                        dir2="prob_right10_large_-1filter",
-                        joined_dir="prob_wo10+right10_large_-1filter")
-filter_threshold_failed(dataset_name,"prob_wo10_large_failed",threshold=1)
-generate_dpo_data_by_answer(dataset_name,chosen_dir="prob_wo10+right10_large_-1filter",
-                  rejected_dir="prob_wo10_large_failed_1filter",
-                  out_dir="wo+right_fwo_-1filter")
 
 
-# load_inference_log("./step1_wrong.log",inference_keys=["wrong"],
-#                    out_dir="./step1_wrong_log.jsonl")
-dataset1 = load_dataset_by_line("./step1_wo+right_log.jsonl")
-dataset2 = load_dataset_by_line("./step1_wrong_log.jsonl")
-inference_num = {'all':8,'wo':0,'right':1,'wrong':7}
-statistic_voting(inference_num=inference_num,wo_data=dataset1,right_data=dataset1,wrong_data=dataset2)
 
 # generate_ft_data(dataset_name,"prob_wo10+right10_large_0.2filter")
 

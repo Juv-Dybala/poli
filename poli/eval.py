@@ -32,8 +32,12 @@ def judge_answer(reply,true_answer):
 
 
 def judge_math_answer(reply,true_answer):
-    answerNum = reply.split("####")[-1]
-    whole_answer = re.search(r'\d+',answerNum)
+    split_list = reply.split("####")
+    if len(split_list) == 1:
+        return False
+    answerNum = split_list[1]
+    pattern_str = r'[-+]?\d+(?:\.\d+)?'
+    whole_answer = re.search(pattern_str,answerNum)
     if not whole_answer:
         return False
     whole_answer = whole_answer.group()
@@ -197,7 +201,7 @@ def inference_eval_t5(model,tokenizer,eval_data):
     return result
     
 
-def ckpt_eval(ckpt_dir,eval_data):
+def ckpt_eval(ckpt_dir,eval_data,math=False):
 
     print("dir: {}".format(ckpt_dir))
     config_dir = os.path.join(ckpt_dir,"adapter_config.json")
@@ -212,7 +216,10 @@ def ckpt_eval(ckpt_dir,eval_data):
     print(model)
 
     print("Evaluate model...")
-    result = inference_eval(model,tokenizer,eval_data,opinion=False)
+    if math:
+        result = math_eval(model,tokenizer,eval_data,n_shot=8)
+    else:
+        result = inference_eval(model,tokenizer,eval_data,opinion=False)
     print(f"dir:{ckpt_dir}  ACC:{result}")
     return result
 
@@ -237,7 +244,7 @@ def math_eval(model,tokenizer,eval_data,n_shot=0):
             N_SHOT_PROMPT = get_math_prompt(n_shot)
         else:
             N_SHOT_PROMPT = ""
-            print(N_SHOT_PROMPT)
+        print(f"{n_shot} shor prompt:\n" + N_SHOT_PROMPT)
         INPUT_PROMPT = "Question: {}. \nAnswer:"
         for item in eval_data:
             input = N_SHOT_PROMPT + INPUT_PROMPT.format(item['question'])

@@ -386,6 +386,33 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
     fout.close()
     
 
+def generate_ft_data_math(dataset_name, dir_name):
+    print("Dataset:{}".format(dataset_name))
+    os.makedirs("../data/finetuning/{}".format(dataset_name),exist_ok=True)
+
+    in_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(dir_name))
+    out_dir = os.path.join("../data/finetuning",dataset_name,"{}.jsonl".format(dir_name))
+
+    fin = open(in_dir,mode="r+")
+    fout = open(out_dir,mode="w+")
+    fout.truncate()
+
+    for line in fin:
+        item = json.loads(line)
+        question = item['Question']
+        golden_rationales = item["Rationales"]
+        answer = item['Answer']
+
+        for rationale in golden_rationales:
+            write_in = {"Question":question,
+                        "Answer":answer,
+                        "Rationale":rationale}
+            fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
+    
+    fin.close()
+    fout.close()
+
+
 def generate_ppo_data(dataset_name, dir_name, reward_model_name):
     # 利用小模型为rationale打分
     # 输出到 data/.../ppo 文件夹中， 包含属性['query','response','reward']

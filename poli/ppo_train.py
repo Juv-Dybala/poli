@@ -297,10 +297,10 @@ if __name__ == '__main__':
     dir_name = args.dir_name
     reward_model_name = args.reward_model
 
-    output_dir = os.path.join("../result/ppo_model",dir_name)
+    output_dir = os.path.join("../result/ppo_model",dataset_name,dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    pretrained_model_directory = os.path.join("../result/sft_model",dir_name)
+    pretrained_model_directory = os.path.join("../result/sft_model",dataset_name,dir_name)
     
     if os.path.exists(pretrained_model_directory):
         model_save_directory = pretrained_model_directory

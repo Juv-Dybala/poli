@@ -11,8 +11,8 @@ from transformers.data import default_data_collator
 from datasets import load_dataset
 import json
 import copy
-from eval import inference_eval, ckpt_eval
-from datasets_load import datasets_load
+from eval import inference_eval, ckpt_eval, math_eval
+from datasets_load import datasets_load,math_datasets_load
 
 
 QUESTION_PROMPT = {
@@ -24,6 +24,8 @@ QUESTION_PROMPT = {
 }
 COT_PROMPT = "Please think step by step. \n"
 ANSWER_PROMPT = "Answer: The correct answer is {Answer[0]} {Answer[1]}. \n {Rationale}"
+MATH_ANSWER_PROMPT = "Answer: {Rationale} #### {Answer}"
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -41,6 +43,11 @@ def parse_args():
         help="The name of dataset. Using train subset to fine-tune and validation subset to eval."
     )
     parser.add_argument(
+        "--math",
+        action="store_true",
+        help="Whether fine-tune on math problem datdaset."
+    )
+    parser.add_argument(
         "--dir_name",
         type=str,
         required=True,
@@ -49,6 +56,7 @@ def parse_args():
     parser.add_argument(
         "--pretrain_dir",
         type=str,
+        default="",
         help="The pretrain model directory."
     )
     parser.add_argument(
@@ -115,7 +123,7 @@ def parse_args():
     parser.add_argument(
         "--save_strategy",
         type=str,
-        default="steps",
+        default='steps',
         help="Save ckpts after each epoch or every n steps."
     )
     parser.add_argument(
@@ -193,15 +201,18 @@ class QADataset(Dataset):
         }
 
 
-def create_prompt_formats(item):
+def create_prompt_formats(item,math=False):
     
     if "Opinion" in item:
         question = QUESTION_PROMPT["with_opinion"].format_map(item)
     else:
         question = QUESTION_PROMPT["no_opinion"].format_map(item)
 
-    assert isinstance(item['Answer'],list) ,"Answer should have key and text."
-    answer = ANSWER_PROMPT.format_map(item)
+    if math:
+        answer = MATH_ANSWER_PROMPT.format_map(item)
+    else:
+        assert isinstance(item['Answer'],list) ,"Answer should have key and text."
+        answer = ANSWER_PROMPT.format_map(item)
 
     # example = question + COT_PROMPT + answer
     example = question + answer
@@ -220,7 +231,7 @@ def preprocess_batch(batch, tokenizer, max_length):
         truncation=True,
     )
 
-def preprocess_dataset(dataset_name, dir_name, tokenizer, max_length, seed):
+def preprocess_dataset(dataset_name, dir_name, tokenizer, max_length, seed, math=False):
     """Format & tokenize it so it is ready for training
     :param tokenizer (AutoTokenizer): Model Tokenizer
     :param max_length (int): Maximum number of tokens to emit from tokenizer
@@ -235,7 +246,8 @@ def preprocess_dataset(dataset_name, dir_name, tokenizer, max_length, seed):
     # Add prompt to each sample
     print("Preprocessing dataset...")
 
-    dataset = datas.map(create_prompt_formats)#, batched=True)
+    _prompt_function = partial(create_prompt_formats,math=math)
+    dataset = datas.map(_prompt_function)
     
     remove_col = ["Question", "Answer", "Rationale", "text"]
     if "Opinion" in dataset.column_names:
@@ -353,7 +365,7 @@ def train(model, tokenizer, dataset, log_dir, output_dir, args):
             logging_steps=1,
             save_strategy=args.save_strategy,
             save_steps=args.save_steps,
-            output_dir=os.path.join("../log/SFT",log_dir),
+            output_dir=os.path.join("../log/SFT",args.dataset,log_dir),
             optim="paged_adamw_8bit",
             seed=args.seed,
         ),
@@ -412,12 +424,35 @@ def eval(model,tokenizer,dataset_name,split='validation',opinion = False):
 
 def eval_ckpts(dir_name,dataset_name,split='validation'):
     result = {}
-    ckpt_dir = os.path.join("../log/SFT",dir_name)
+    ckpt_dir = os.path.join("../log/SFT",dataset_name,dir_name)
     eval_data = datasets_load(dataset_name,split=split)
     
     for ckpt_name in next(os.walk(ckpt_dir))[1]:
         ckpt_path = os.path.join(ckpt_dir,ckpt_name)
         score = ckpt_eval(ckpt_path,eval_data)
+        result[ckpt_name] = score
+    return result
+
+
+def eval_math(model, tokenizer, dataset_name, subset='math', split='test'):
+
+    eval_data = math_datasets_load(dataset_name,subset=subset,split=split)
+    print(eval_data)
+
+    result = math_eval(model,tokenizer,eval_data,n_shot=8)
+    print("")
+    print(result)
+    return result
+
+
+def eval_math_ckpts(dir_name,dataset_name,subset='main',split='test'):
+    result = {}
+    ckpt_dir = os.path.join("../log/SFT",dataset_name,dir_name)
+    eval_data = math_datasets_load(dataset_name,subset=subset,split=split)
+    
+    for ckpt_name in next(os.walk(ckpt_dir))[1]:
+        ckpt_path = os.path.join(ckpt_dir,ckpt_name)
+        score = ckpt_eval(ckpt_path,eval_data,math=True)
         result[ckpt_name] = score
     return result
 
@@ -432,12 +467,12 @@ if __name__ == "__main__":
     dir_name = args.dir_name
     pretrain_dir = args.pretrain_dir
 
-    output_dir = os.path.join("../result/lora_model/sft",dir_name)
+    output_dir = os.path.join("../result/lora_model/sft",dataset_name,dir_name)
     os.makedirs(output_dir,exist_ok=True)
-    output_merged_dir = os.path.join("../result/sft_model",dir_name)
+    output_merged_dir = os.path.join("../result/sft_model",dataset_name,dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    pretrain_model_directory = os.path.join("../result/sft_model",pretrain_dir)
+    pretrain_model_directory = os.path.join("../result/sft_model",dataset_name,pretrain_dir)
     if os.path.exists(pretrain_model_directory):
         model_save_directory = pretrain_model_directory
     else:
@@ -457,15 +492,18 @@ if __name__ == "__main__":
 
 
     # 测评初始或已保存模型在数据集上的表现
-    # eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
+    # if args.math:
+    #     eval_math(model,tokenizer,dataset_name,subset='main',split='test')
+    # else:
+    #     eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
     # exit()
 
 
     # dataset = QADataset(dataset_name,tokenizer).shuffle(seed=42)
     # dataloader = DataLoader(dataset,shuffle=True,batch_size=batch_size,
     #                         collate_fn=default_data_collator,drop_last=True)
-    dataset = preprocess_dataset(dataset_name,dir_name,tokenizer,
-                                 max_length=args.max_length,seed=args.seed)
+    dataset = preprocess_dataset(dataset_name, dir_name, tokenizer,
+                                 max_length=args.max_length,seed=args.seed,math=args.math)
     print(dataset)
     print(dataset['train'][0])
     
@@ -484,9 +522,15 @@ if __name__ == "__main__":
     tokenizer.save_pretrained(output_merged_dir)
     
     print("Evaluate model...")
-    score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
+    if args.math:
+        score = eval_math(model,tokenizer,dataset_name,subset='main',split='test')
+    else:
+        score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
 
     print("Evaluate ckpts...")
-    result = eval_ckpts(dir_name,dataset_name,split="validation")
+    if args.math:
+        result = eval_math_ckpts(dir_name,dataset_name,subset='main',split='test')
+    else:
+        result = eval_ckpts(dir_name,dataset_name,split="validation")
     result['final'] = score
     print(result)
