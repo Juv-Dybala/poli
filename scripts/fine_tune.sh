@@ -16,6 +16,7 @@ python ../poli/fine_tune.py \
     --lr 3e-4 \
     --pretrain_dir "" \
     --dir_name "step1_wo10+right10" \
+    --eval_ckpts
     
     # --max_step 20 \
     # --eval_opinion

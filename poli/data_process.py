@@ -5,7 +5,7 @@ import os.path
 import re
 from pre_filter import generate_answer,using_qa_generate_rationale,using_opinion_generate_ar, \
         answer_question,answer_math_question,using_opinion_generate_math_ar
-from refined_selection import select_rationale,get_rationale_type,q2a,qr2a
+from refined_selection import select_rationale,get_rationale_type,q2a,qr2a,q2a_math,qr2a_math
 from datasets_load import datasets_load,load_preprocessed_data,math_datasets_load
 import json
 import random
@@ -13,6 +13,7 @@ import argparse
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
+from collections import Counter
 
 
 def parse_args():
@@ -333,7 +334,7 @@ def generate_ft_data(dataset_name, dir_name, use_opinion_ft = False, sycophancy 
                             "Answer":answer,
                             "Rationale":golden_rationales[0]}
                 fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
-                # with opinoin
+                # with opinion
                 for i in range(1,num_of_choice+1):
                     opinion = chr(ord('A')+i-1)
                     if i < num_of_rationales:
@@ -784,7 +785,6 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
                             "True Answer":answerNum,
                             "Rationales":failed_right_rationales}
                 fright_failed.write(json.dumps(write_in, ensure_ascii=False) + "\n")
-        # wrong opinion (todo)
         
         pbar.update(1)
     
@@ -797,6 +797,73 @@ def step1_generate_math(large_lm_name,dataset_name="gsm8k",inference_num=None):
         fright_failed.close()
 
     print(pass_count)
+
+
+def step1_generate_math_wrong_opinion(large_lm_name,dataset_name,failed_dir,inference_num=10):
+    # 利用wrong opinion inference
+    # 错误的answerNum 来自failed inference answer
+    dataset = load_preprocessed_data(dataset_name,failed_dir)
+    print(dataset)
+
+    fwrong = open(os.path.join("../data/processed",dataset_name,f"step1_wrong{inference_num}.jsonl"),mode="a+")
+    fwrong_failed = open(os.path.join("../data/processed",dataset_name,f"step1_wrong{inference_num}_failed.jsonl"),mode="a+")
+    pass_count = 0
+
+    large_lm,tokenizer = load_llama(model_name=large_lm_name)
+    print("Generate and Prefilter rationales. ----------------------------------------")
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    def _get_wrong_opinions(wrong_answers,inference_num):
+        if len(wrong_answers) > inference_num:
+            opinion_list = random.choices(wrong_answers,k=inference_num)
+        else:
+            num_of_choice = inference_num - len(wrong_answers)
+            opinion_list =  wrong_answers + [random.choice(wrong_answers) for i in range(num_of_choice)]
+        return dict(Counter(opinion_list))
+
+    for item in dataset:
+        question = item['Question']
+        answerNum = item['True Answer']
+        print("=================================================================")
+        print(f"Question: {question}")
+        print(f"Correct answerNum: {answerNum}")
+
+        perturb_answers = [wrong_answer for wrong_answer,wrong_rationale in item['Rationales']]
+        wrong_opinions = _get_wrong_opinions(perturb_answers,inference_num)
+        print(wrong_opinions)
+
+        wrong_rationales = []
+        wrong_answers = []
+        failed_wrong_rationales = []
+        for opinion,generate_time in wrong_opinions.items():
+            rationales,answer_list,failed_rationales = using_opinion_generate_math_ar(large_lm,tokenizer,
+                question,opinion_num=opinion,ground_answer=answerNum,generate_time=generate_time,n_shot=8)
+            wrong_rationales += rationales
+            wrong_answers += answer_list
+            failed_wrong_rationales += failed_rationales
+        print(wrong_answers)
+        pass_count += len(wrong_rationales)
+        print("Generate {} rationales using wrong opinion.".format(len(wrong_rationales)))
+        print("TEMP PASSing RATE : {}".format(pass_count/((pbar.n+1)*inference_num)))
+
+        if len(wrong_rationales):
+            write_in = {"Question":question,
+                        "Answer":answerNum,
+                        "Rationales":wrong_rationales}
+            fwrong.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        if len(failed_wrong_rationales):
+            write_in = {"Question":question,
+                        "True Answer":answerNum,
+                        "Rationales":failed_wrong_rationales}
+            fwrong_failed.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        
+        pbar.update(1)
+    
+    pbar.close()
+    fwrong.close()
+    fwrong_failed.close()
 
 
 def step2_selection_simple(dataset_name,dir_name,small_lm_name,output):
@@ -967,6 +1034,72 @@ def step2_selection_prob(dataset_name,dir_name,small_lm_name,output,threshold=-1
             write_in = {"Question":question,
                         "Num of choice":item['Num of choice'],
                         "Answer":answer,
+                        "Rationales":golden_rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        pbar.update(1)
+    
+
+    pbar.close()
+    fout.close()
+    print(f"Total #rationale BEFORE: {total}")
+    print(f"Pass threshold rationale: {pass_count}")
+    # print(f"All prob lift data: {prob_lift_list}")
+    
+    # 统计 prob lift
+    plt.figure(figsize=(10,8),dpi=80)
+    sns.kdeplot(prob_lift_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
+    plt.savefig(output+".png")
+
+
+def step2_selection_prob_math(dataset_name,dir_name,small_lm_name,output,threshold=-1.0):
+    # 通过Q->A QR->A 的logits计算得分，大于threshold的通过selection
+    # 对于数学问题，不要求其回答正确数字，只要回答 yes/no 即可
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
+    fout = open(output_dir,mode="a+")
+
+    # 通过率计算
+    total = 0
+    pass_count = 0
+    prob_lift_list = []
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    print("Select golden rationales. -------------------------------------")
+
+    for item in dataset:
+
+        question = item['Question']
+        print(question)
+        answerNum = item['Answer']
+        print(f"True answerNum: {answerNum}")
+
+        q2a_prob = q2a_math(small_lm,small_tokenizer,question,answerNum,prob=True)
+        # print(q2a_prob)
+
+        pre_filter_rationales = item['Rationales']
+        total += len(pre_filter_rationales)
+        golden_rationales = []
+
+        for rationale in pre_filter_rationales:
+
+            qr2a_prob = qr2a_math(small_lm,small_tokenizer,question,answerNum,rationale,prob=True)
+            prob_lift = qr2a_prob - q2a_prob
+            prob_lift_list.append(prob_lift)
+            print(f"The rationale lifted the {prob_lift} probility to answer correctly!")
+
+            if prob_lift >= threshold:
+                # golden_rationales.append(rationale) 
+                golden_rationales.append([rationale,prob_lift])
+                pass_count += 1
+
+        print("After step2 selection,there are {} rationale(s) left.".format(len(golden_rationales)))
+
+        if len(golden_rationales):
+            write_in = {"Question":question,
+                        "Answer":answerNum,
                         "Rationales":golden_rationales}
             fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
         pbar.update(1)

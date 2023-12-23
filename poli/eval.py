@@ -7,7 +7,7 @@ from peft import AutoPeftModelForCausalLM
 from datasets_load import datasets_load,math_datasets_load
 from data_process import model_download
 from pre_filter import extract_ar, get_math_prompt
-from refined_selection import q2a
+from refined_selection import q2a, get_answerNum
 import time
 from tqdm import tqdm
 import re
@@ -32,8 +32,17 @@ def judge_answer(reply,true_answer):
 
 
 def judge_math_answer(reply,true_answer):
+    reply = reply.replace(",","")
     split_list = reply.split("####")
     if len(split_list) == 1:
+        sentences = reply.split(".")
+        for i in range(len(sentences)-1,-1,-1):
+            nums = re.findall(r'[-+]?\d+(?:\.\d+)?',sentences[i])
+            if not nums:
+                continue
+            whole_answer = nums[-1]
+            print(whole_answer)
+            return true_answer == whole_answer
         return False
     answerNum = split_list[1]
     pattern_str = r'[-+]?\d+(?:\.\d+)?'
@@ -269,7 +278,30 @@ def math_eval(model,tokenizer,eval_data,n_shot=0):
 
 
 def math_eval_t5(model,tokenizer,eval_data):
-    pass
+    num_of_question = len(eval_data)
+    print(num_of_question)
+    result = {}
+
+    with tqdm(total=num_of_question) as pbar:
+        pbar.set_description("Evaluating...")
+        acc_count = 0
+
+        for item in eval_data:
+            print("===============================")
+            question = item['question']
+            print(question)
+            true_answerNum = item['answerNum']
+            print(f"True answerNum:{true_answerNum}")
+            reply_answerNum = get_answerNum(model,tokenizer,question,few_shot=True)
+            print(reply_answerNum)
+            if reply_answerNum == true_answerNum:
+                acc_count += 1
+                print("ANSWER PASS")
+
+            pbar.update(1)
+        result['ACC'] = acc_count / num_of_question
+    print(result)
+    return result
 
 
 def base_model_eval(model_name,eval_data,math=False):
@@ -300,7 +332,7 @@ def base_model_eval(model_name,eval_data,math=False):
 if __name__ == "__main__":
     
     model_name = "meta-llama/Llama-2-7b-chat-hf"
-    # model_name = "google/flan-t5-base"
+    model_name = "google/flan-t5-large"
     dataset_name = "qasc"
 
     eval_data = math_datasets_load("gsm8k","main",'test')

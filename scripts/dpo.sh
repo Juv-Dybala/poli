@@ -15,6 +15,7 @@ python ../poli/dpo_train.py \
     --lr 3e-4 \
     --sft_dir "large-0.4" \
     --dir_name "wo+right_fwo_0.1filter" \
+    --eval_ckpts \
     
     # --max_step 20 \
     # --eval_opinion
