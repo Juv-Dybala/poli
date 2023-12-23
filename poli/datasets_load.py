@@ -380,6 +380,48 @@ def join_processed_dataset(dataset_name,dir1,dir2,joined_dir,outer_join=True):
     fout.close()
 
 
+def join_processed_failed_math_dataset(dataset_name,dir1,dir2,joined_dir,outer_join=True):
+    dataset1 = load_preprocessed_data(dataset_name,dir1)
+    dataset2 = load_preprocessed_data(dataset_name,dir2)
+    fout = open(os.path.join("../data/processed",dataset_name,f"{joined_dir}.jsonl"),mode="a+")
+
+    if outer_join:
+        for item in dataset1:
+            question = item["Question"]
+            answer = item["True Answer"]
+            rationales = item["Rationales"]
+
+            same_question_item = dataset2.filter(lambda x:x["Question"]==question)
+            if len(same_question_item):
+                same_question_item = same_question_item[0]
+                assert same_question_item['True Answer']==answer ,"True Answer must be the same!"
+                rationales += same_question_item['Rationales']
+
+            write_in = {"Question":question,
+                        "True Answer":answer,
+                        "Rationales":rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        for item in dataset2.filter(lambda x: x["Question"] not in dataset1["Question"]):
+            fout.write(json.dumps(dict(item), ensure_ascii=False) + "\n")          
+    else:    
+        dataset1 = dataset1.filter(lambda x: x['Question'] in dataset2['Question'])
+        dataset2 = dataset2.filter(lambda x: x['Question'] in dataset1['Question'])
+        for item in dataset1:
+            question = item["Question"]
+            answer = item["True Answer"]
+            rationales = item["Rationales"]
+        
+            same_question_item = dataset2.filter(lambda x:x["Question"]==question)[0]
+            assert same_question_item['True Answer']==answer ,"True Answer must be the same!"
+            rationales += same_question_item['Rationales']
+            write_in = {"Question":question,
+                        "True Answer":answer,
+                        "Rationales":rationales}
+            fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+    
+    fout.close()
+
+
 def load_inference_log(log_dir,inference_keys=[],out_dir=None):
     file = open(log_dir,mode="r")
     num_of_answerlist = len(inference_keys)

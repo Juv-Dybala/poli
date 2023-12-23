@@ -4,6 +4,8 @@ from transformers import pipeline,AutoTokenizer,T5ForConditionalGeneration,AutoM
 import os
 from tqdm import tqdm
 import re
+import random
+from pre_filter import get_math_prompt
 
 # This file uses T5.
 
@@ -25,16 +27,38 @@ EXAMPLE_PROMPT = "Question: What form on angiosperms? (A) lamphreys (B) backbone
                 # "Question: What is more pliable than bone? (A) Cartilage (B) tiny hairs (C) tetraceratops (D) teeth (E) femur (F) mineral (G) Therapsids (H) keratin" + \
                 #     "Answer: (A) \n"
 
+MATH_TF_EXAMPLE_PROMPT = "Question: There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today? " + \
+                        "Attempted Answer: 6. Is this answer correct? (A) Yes (B) No \nAnswer: (A) \n" + \
+                    "Question: If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot? " + \
+                        "Attempted Answer: 32. Is this answer correct? (A) Yes (B) No \nAnswer: (B) \n" + \
+                    "Question: Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have left in total? " + \
+                        "Attempted Answer: 39. Is this answer correct? (A) Yes (B) No \nAnswer: (A) \n" + \
+                    "Question: Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give to Denny? " + \
+                        "Attempted Answer: 28. Is this answer correct? (A) Yes (B) No \nAnswer: (B) \n" + \
+                    "Question: There were nine computers in the server room. Five more computers were installed each day, from monday to thursday. How many computers are now in the server room? " + \
+                        "Attempted Answer: 29. Is this answer correct? (A) Yes (B) No \nAnswer: (A) \n"
+
+MATH_QA_EXAMPLE_PROMPT = "Question: There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today? " + \
+                        "Answer: 6 . \n" + \
+                    "Question: If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot? " + \
+                        "Answer: 5 . \n" + \
+                    "Question: Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have left in total? " + \
+                        "Answer: 39 . \n" + \
+                    "Question: Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give to Denny? " + \
+                        "Answer: 8 . \n" + \
+                    "Question: There were nine computers in the server room. Five more computers were installed each day, from monday to thursday. How many computers are now in the server room? " + \
+                        "Answer: 29 . \n"
 
 
-def ask_lm(input,model,tokenizer):
+def ask_lm(input,model,tokenizer,math=False):
 
+    max_new_tokens = 200 if math else 50
     tokenized_input = tokenizer(input,return_tensors="pt",padding=True).to("cuda")
     output_sequences = model.generate(
         input_ids=tokenized_input["input_ids"],
         attention_mask=tokenized_input["attention_mask"],
         do_sample=False,  # disable sampling to test if batching affects output
-        max_new_tokens = 50
+        max_new_tokens = max_new_tokens
     )
 
     lm_answer = tokenizer.batch_decode(output_sequences, skip_special_tokens=True)[0]
@@ -306,3 +330,95 @@ def qr2a(model,tokenizer,question,true_answer,rationale,prob=False,few_shot=True
     else:
         qr2a,prob = ask_lm_prob(qr2a_input,model,tokenizer,true_answer)
         return prob
+
+
+def q2a_math(model,tokenizer,question,answerNum,prob=False,few_shot=True):
+
+    example = "Answer the following multiple choice question and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
+    ASK_PROMPT = f"Question: {question} Attempted Answer: {answerNum}. Is this answer correct? (A) Yes (B) No "
+    true_answer = ["(A)","Yes"]
+
+    if few_shot:
+        q2a_input = example + ASK_PROMPT + " \nAnswer: "
+    else:
+        q2a_input = ASK_PROMPT + " \nAnswer: "
+    if not prob:
+        q2a_answer = ask_lm(q2a_input,model,tokenizer)
+        print(q2a_answer,end=" ")
+        q2a = judge_answer(q2a_answer,true_answer)
+        return q2a
+    else:
+        q2a,prob = ask_lm_prob(q2a_input,model,tokenizer,true_answer)
+        return prob
+
+
+def qr2a_math(model,tokenizer,question,answerNum,rationale,prob=False,few_shot=True):
+
+    example = "Answer the following multiple choice question and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
+    ASK_PROMPT = f"Question: {question} \nAttempted Answer: {answerNum}. {rationale}\n" + \
+                    "Is this answer correct? (A) Yes (B) No "
+    true_answer = ["(A)","Yes"]
+
+    if few_shot:
+        q2a_input = example + ASK_PROMPT + " \nAnswer: "
+    else:
+        q2a_input = ASK_PROMPT + " \nAnswer: "
+    if not prob:
+        q2a_answer = ask_lm(q2a_input,model,tokenizer)
+        print(q2a_answer,end=" ")
+        q2a = judge_answer(q2a_answer,true_answer)
+        return q2a
+    else:
+        q2a,prob = ask_lm_prob(q2a_input,model,tokenizer,true_answer)
+        return prob
+
+
+def get_answerNum(model,tokenizer,question,few_shot=True):
+
+    # example = "Answer the following multiple choice question and follow this format: \n" + MATH_QA_EXAMPLE_PROMPT
+    example = get_math_prompt(n_shot=8)
+    if few_shot:
+        q2a_input = example + "Question: " + question + " \n Answer: "
+    else:
+        q2a_input = "Question: " + question + " \n Answer: "
+    
+    reply = ask_lm(q2a_input,model,tokenizer,math=True)
+    print(reply)
+
+    reply = reply.replace(",","")
+    sentences = reply.split(".")
+    for i in range(len(sentences)-1,-1,-1):
+        nums = re.findall(r'[-+]?\d+(?:\.\d+)?',sentences[i])
+        if not nums:
+            continue
+        whole_answer = nums[-1]
+        return whole_answer
+    return None
+        
+
+def q2a_math_perturb(model,tokenizer,question,answerNum,prob=False,few_shot=True):
+    # 判断模型对于正确答案输出Yes，错误答案输出No的能力
+    answerNum = int(answerNum)
+    perturb_answer = answerNum + random.choice([x for x in range(-10,11) if x!=0] + [answerNum*2,answerNum//2])
+    example = "Answer the following multiple choice question and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
+    ASK_PROMPT = "Question: {} Attempted Answer: {}. Is this answer correct? (A) Yes (B) No "
+    right_input = ASK_PROMPT.format(question,answerNum) + " \nAnswer: "
+    wrong_input = ASK_PROMPT.format(question,perturb_answer)+ " \nAnswer: "
+
+    if few_shot:
+        right_input = example + right_input
+        wrong_input = example + wrong_input
+    
+    print(f"Right answerNum: {answerNum} ---- Perturbed answerNum: {perturb_answer}")
+    if not prob:
+        right_answer = ask_lm(right_input,model,tokenizer)
+        wrong_answer = ask_lm(wrong_input,model,tokenizer)
+        right_judge = judge_answer(right_answer,["(A)","Yes"])
+        wrong_judge = judge_answer(wrong_answer,["(B)","No"])
+        print(f"Judge: Right---{right_judge} ||| Wrong---{wrong_judge}")
+        return right_judge,wrong_judge
+    else:
+        right_judge,right_prob = ask_lm_prob(right_input,model,tokenizer,["(A)","Yes"])
+        wrong_judge,wrong_prob = ask_lm_prob(wrong_input,model,tokenizer,["(A)","Yes"])
+        print(f"Judge: Right---{right_judge} {right_prob} ||| Wrong---{wrong_judge} {wrong_prob}")
+        return right_prob,wrong_prob

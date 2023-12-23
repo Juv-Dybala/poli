@@ -130,6 +130,11 @@ def parse_args():
         help="Learning rate of fine-tune."
     )
     parser.add_argument(
+        "--eval_ckpts",
+        action="store_true",
+        help="Whether to eval ckpts after training."
+    )
+    parser.add_argument(
         "--eval_opinion",
         action="store_true",
         help="When evaluating on validation set, using with-opinion input."
@@ -313,8 +318,8 @@ if __name__ == '__main__':
     output_merged_dir = os.path.join("../result/dpo_model",dataset_name,dir_name)
     
     original_model_save_directory = os.path.join("../models",model_name)
-    sft_model_directory = os.path.join("../result/sft_model",dataset_name,dir_name)
-    if os.path.exists(sft_model_directory):
+    sft_model_directory = os.path.join("../result/sft_model",dataset_name,sft_dir)
+    if sft_dir != "" and os.path.exists(sft_model_directory):
         model_save_directory = sft_model_directory
     else:
         model_save_directory = original_model_save_directory
@@ -358,10 +363,11 @@ if __name__ == '__main__':
     else:
         score = eval(model,tokenizer,dataset_name,split="validation",opinion=args.eval_opinion)
 
-    print("Evaluate ckpts...")
-    if args.math:
-        result = eval_math_ckpts(dir_name,dataset_name,subset='main',split='test')
-    else:
-        result = eval_ckpts(dir_name,dataset_name,split="validation")
-    result['final'] = score
-    print(result)
+    if args.eval_ckpts:
+        print("Evaluate ckpts...")
+        if args.math:
+            result = eval_math_ckpts(dir_name,dataset_name,subset='main',split='test')
+        else:
+            result = eval_ckpts(dir_name,dataset_name,split="validation")
+        result['final'] = score
+        print(result)

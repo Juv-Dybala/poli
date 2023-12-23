@@ -3,6 +3,7 @@ import transformers
 from transformers import pipeline,AutoTokenizer,AutoModelForCausalLM
 import os.path
 import re
+import random
 
 # This file uses llama2.
 model_name = "meta-llama/Llama-2-7b-chat-hf"
@@ -350,6 +351,7 @@ def get_math_prompt(n_shot):
     # n_shot ≤ 8
     few_shot_prompt = "Answer the following math question and give the answer Number. Please follow this format: \n"
     n_shot_example = MATH_NSHOT_PROMPTS[:n_shot]
+    # n_shot_example = random.choices(MATH_NSHOT_PROMPTS)
     n_shot_example = "".join(n_shot_example)
     return few_shot_prompt + n_shot_example
 

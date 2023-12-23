@@ -6,7 +6,7 @@ import re
 from data_process import load_llama,load_t5,generate_ft_data
 from datasets_load import *
 from pre_filter import using_hint_generate_ar,statistic_failed_ar
-from refined_selection import group_by_leaked,statistic_las,q2a,qr2a
+from refined_selection import *
 from tqdm import tqdm
 import random
 import matplotlib.pyplot as plt
@@ -347,3 +347,94 @@ def statistic_voting(inference_num,wo_data,right_data,wrong_data):
     print(acc_count)
     print(f"Voting ACC:  self-consistency: {acc_count['self_consistency']/len(wo_data)} step1: {acc_count['step1']/len(wo_data)}")
         
+
+def statistic_reward_on_math(small_lm_name,dataset_name,dir_name):
+
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    pbar = tqdm(total=len(dataset))
+    for item in dataset:
+
+        print("===================================")
+        question = item['Question']
+        print(question)
+        answerNum = item['Answer']
+        print(f"True answerNum: {answerNum}")
+
+        q2a_prob = q2a_math(small_lm,small_tokenizer,question,answerNum,prob=True)
+        print(f"Prob of yes: {q2a_prob}")
+
+        q2a_answerNum = get_answerNum(small_lm,small_tokenizer,question,few_shot=True)
+        print(f"Generated answerNum: {q2a_answerNum}")
+        if q2a_answerNum == answerNum:
+            print("Q2A Right!")
+        
+        rationales = item['Rationales']
+        rewards = []
+        for rationale in rationales:
+
+            qr2a_prob = qr2a_math(small_lm,small_tokenizer,question,answerNum,rationale,prob=True)
+            prob_lift = qr2a_prob - q2a_prob
+            rewards.append(prob_lift)
+        
+        max_reward = max(rewards)
+        best_rationale = rationales[rewards.index(max_reward)]
+        print(f"Max Reward:{max_reward} --- {best_rationale}")
+        min_reward = min(rewards)
+        worst_rationale = rationales[rewards.index(min_reward)]
+        print(f"Min Reward:{min_reward} --- {worst_rationale}")
+
+        pbar.update(1)
+    
+    pbar.close()
+
+
+def verify_math_tf_prob(small_lm_name,dataset_name,dir_name,prob=False):
+
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    
+    if not prob:
+        # 对应4类：right_judge 和 wrong_judge 能否正确
+        type_count = {"RS_WS":0,"RS_WF":0,"RF_WS":0,"RF_WF":0}
+    else:
+        count = 0
+        prob_diff = []
+    pbar = tqdm(total=len(dataset))
+    for item in dataset:
+
+        print("===================================")
+        question = item['Question']
+        print(question)
+        answerNum = item['Answer']
+
+        right_judge,wrong_judge = q2a_math_perturb(small_lm,small_tokenizer,question,answerNum,
+                                                   prob,few_shot=True)
+        if not prob:
+            if right_judge and wrong_judge:
+                print("JUDGE successfully!!!")
+                type_count["RS_WS"] += 1
+            elif right_judge:
+                type_count["RS_WF"] += 1
+            elif wrong_judge:
+                type_count["RF_WS"] += 1
+            else:
+                type_count["RF_WF"] += 1
+        else:
+            if right_judge > wrong_judge:
+                print("Prob of right answer > perturb answer")
+                count += 1
+            prob_diff.append(right_judge-wrong_judge)
+        
+        pbar.update(1)
+    
+    pbar.close()
+    if not prob:
+        print(type_count)
+    else:
+        print(f"Count >0:{count}")
+
+        # 统计 prob diff
+        plt.figure(figsize=(10,8),dpi=80)
+        sns.kdeplot(prob_diff,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
+        plt.savefig(f"prob_diff.png")
