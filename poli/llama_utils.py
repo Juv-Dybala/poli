@@ -57,7 +57,7 @@ def ask_lm_prob_math(input,model,tokenizer,true_answer,locat_str,config=greedy_c
         
     # print(output_sequence)
     lm_answer = tokenizer.batch_decode(output_sequence, skip_special_tokens=True)[0]
-    print(lm_answer)
+    # print(lm_answer)
     
     answerKey = true_answer[0][1]
     answerText = true_answer[1] # 只有Yes/No,只能有一个词
@@ -65,7 +65,7 @@ def ask_lm_prob_math(input,model,tokenizer,true_answer,locat_str,config=greedy_c
     if len(split_list) > 1 and split_list[1] != '' and not split_list[1].isspace():
         # 存在定位符,且定位符后不为空，在定位符后找
         lm_answer = split_list[1]
-        print("locat str")
+        # print("locat str")
         tokenized_locat_str = tokenizer(locat_str)['input_ids'][1:]
         locat_str_loc = _get_sublist_index(mainlist=output_sequence[0].tolist(),sublist=tokenized_locat_str)
         start_research_loc = locat_str_loc+len(tokenized_locat_str)
@@ -79,7 +79,7 @@ def ask_lm_prob_math(input,model,tokenizer,true_answer,locat_str,config=greedy_c
 
     else:
         # 没有定位符，根据答案出现的形式
-        print("No locat str")
+        # print("No locat str")
         if re.search(r"\([A-Z].*\)",lm_answer): # (A) 格式，寻找其 最后 出现的位置
             loc = torch.nonzero(torch.eq(output_sequence[0],get_vocab_loc(tokenizer,"▁(")))[-1].item()
             answerKey_index = get_vocab_loc(tokenizer,answerKey)
@@ -89,7 +89,7 @@ def ask_lm_prob_math(input,model,tokenizer,true_answer,locat_str,config=greedy_c
             prob = score[0,answerKey_index]
 
     prob = prob.item()
-    print (prob)
+    # print (prob)
     return lm_answer,prob
 
 

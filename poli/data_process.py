@@ -1191,12 +1191,14 @@ def step2_selection_prob_math_llama(dataset_name,dir_name,large_lm_name,output):
     # 通过Q->A QR->A 的logits计算得分 ，不再使用QR2A-Q2A,直接用QR2A
     # 对于数学问题，不要求其回答正确数字，只要回答 yes/no 即可
     dataset = load_preprocessed_data(dataset_name,dir_name)
-    model,tokenizer = load_llama(model_name=large_lm_name,pipeline=False) # 不再使用pipeline
+    dataset = dataset.select([2185+x for x in range(2000)])
+    print(len(dataset))
+    model,tokenizer = load_llama(model_name=large_lm_name,pipeline=False)
     output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
     fout = open(output_dir,mode="a+")
 
     total = 0
-    prob_lift_list = []
+    rewards_list = []
 
     pbar = tqdm(total = len(dataset))
     pbar.set_description("Processing data...")
@@ -1220,12 +1222,12 @@ def step2_selection_prob_math_llama(dataset_name,dir_name,large_lm_name,output):
         for rationale in rationales:
             
             qr2a_prob = judge_attempted_rationale_math(model,tokenizer,question,answerNum,rationale,prob=True)
-            prob_lift = qr2a_prob
-            prob_lift_list.append(prob_lift)
-            print(f"The rationale lifted the {prob_lift} probility to answer correctly!")
+            rewards_list.append(qr2a_prob)
+            print(f"The rationale got score: {qr2a_prob}!")
 
-            rationales_with_rewards.append([rationale,prob_lift])
-
+            rationales_with_rewards.append([rationale,qr2a_prob])
+        
+        print(f"{len(rationales_with_rewards)} Rationales are scored.")
         write_in = {"Question":question,
                     "Answer":answerNum,
                     "Rationales":rationales_with_rewards}
@@ -1240,7 +1242,7 @@ def step2_selection_prob_math_llama(dataset_name,dir_name,large_lm_name,output):
     
     # 统计 prob lift
     plt.figure(figsize=(10,8),dpi=80)
-    sns.kdeplot(prob_lift_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
+    sns.kdeplot(rewards_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
     plt.savefig(output+".png")
 
 
