@@ -5,7 +5,7 @@ import os
 from tqdm import tqdm
 import re
 import random
-from pre_filter import get_math_prompt
+from llama_utils import get_math_prompt
 
 # This file uses T5.
 
@@ -28,15 +28,15 @@ EXAMPLE_PROMPT = "Question: What form on angiosperms? (A) lamphreys (B) backbone
                 #     "Answer: (A) \n"
 
 MATH_TF_EXAMPLE_PROMPT = "Question: There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today? " + \
-                        "Attempted Answer: 6. Is this answer correct? (A) Yes (B) No \nAnswer: (A) \n" + \
+                        "Attempted Answer: 6. Is this answer correct? (A) Yes (B) No \nAnswer: There are 15 trees originally. Then there were 21 trees after some more were planted. So there must have been 21 - 15 = 6. #### (A) \n" + \
                     "Question: If there are 3 cars in the parking lot and 2 more cars arrive, how many cars are in the parking lot? " + \
-                        "Attempted Answer: 32. Is this answer correct? (A) Yes (B) No \nAnswer: (B) \n" + \
+                        "Attempted Answer: 32. Is this answer correct? (A) Yes (B) No \nAnswer: There are originally 3 cars. 2 more cars arrive. #### (B) \n" + \
                     "Question: Leah had 32 chocolates and her sister had 42. If they ate 35, how many pieces do they have left in total? " + \
-                        "Attempted Answer: 39. Is this answer correct? (A) Yes (B) No \nAnswer: (A) \n" + \
+                        "Attempted Answer: 39. Is this answer correct? (A) Yes (B) No \nAnswer: Originally, Leah had 32 chocolates. Her sister had 42. So in total they had 32 + 42 = 74. After eating 35, they had 74 - 35 = 39. #### (A) \n" + \
                     "Question: Jason had 20 lollipops. He gave Denny some lollipops. Now Jason has 12 lollipops. How many lollipops did Jason give to Denny? " + \
-                        "Attempted Answer: 28. Is this answer correct? (A) Yes (B) No \nAnswer: (B) \n" + \
+                        "Attempted Answer: 28. Is this answer correct? (A) Yes (B) No \nAnswer: Jason started with 20 lollipops. Then he had 12 after giving some to Denny. So he gave Denny 20 - 12 = 8. #### (B) \n" + \
                     "Question: There were nine computers in the server room. Five more computers were installed each day, from monday to thursday. How many computers are now in the server room? " + \
-                        "Attempted Answer: 29. Is this answer correct? (A) Yes (B) No \nAnswer: (A) \n"
+                        "Attempted Answer: 29. Is this answer correct? (A) Yes (B) No \nAnswer: There were originally 9 computers. For each of 4 days, 5 more computers were added. So 5 * 4 = 20 computers were added. 9 + 20 is 29. #### (A) \n"
 
 MATH_QA_EXAMPLE_PROMPT = "Question: There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today? " + \
                         "Answer: 6 . \n" + \
@@ -50,14 +50,14 @@ MATH_QA_EXAMPLE_PROMPT = "Question: There are 15 trees in the grove. Grove worke
                         "Answer: 29 . \n"
 
 
-def ask_lm(input,model,tokenizer,math=False):
+def ask_lm(input,model,tokenizer,math=False,do_sample=False):
 
-    max_new_tokens = 200 if math else 50
+    max_new_tokens = 300 if math else 50
     tokenized_input = tokenizer(input,return_tensors="pt",padding=True).to("cuda")
     output_sequences = model.generate(
         input_ids=tokenized_input["input_ids"],
         attention_mask=tokenized_input["attention_mask"],
-        do_sample=False,  # disable sampling to test if batching affects output
+        do_sample=do_sample,  #False: disable sampling to test if batching affects output
         max_new_tokens = max_new_tokens
     )
 
@@ -119,6 +119,67 @@ def ask_lm_prob(input,model,tokenizer,true_answer):
     return lm_answer,prob
 
 
+def ask_lm_prob_math(input,model,tokenizer,true_answer,locat_str):
+    # 根据locat_str定位，然后取概率
+    # print(input)
+    tokenized_input = tokenizer(input,return_tensors="pt",padding=True).to("cuda")
+    output = model.generate(
+        input_ids=tokenized_input["input_ids"],
+        attention_mask=tokenized_input["attention_mask"],
+        do_sample=False,  # disable sampling to test if batching affects output
+        max_new_tokens = 100,
+        return_dict_in_generate=True, # generate logits
+        output_scores = True,
+    )
+
+    # output.scores是一个tuple，元素数=生成的字符数（开始符不算），每一个元素都是这一次字符在词表（32128个词）上的得分
+    # 这个得分是对数似然，softmax转为概率
+    score = torch.stack(output.scores,dim=0).squeeze() # [seq_len-1,vocab_size]
+    score = score.softmax(-1)
+    # print(score)
+
+    # 与词表配合查看，看看生成概率高的是哪些词
+    # tops,ids = torch.topk(score,k=10,dim=1)
+    # print(tops)
+
+    output_sequence = output.sequences
+    lm_answer = tokenizer.batch_decode(output_sequence, skip_special_tokens=True)[0]
+    print(lm_answer)
+    # print(output_sequence)
+
+    answerKey = true_answer[0][1]
+    answerText = true_answer[1] # 只有Yes/No,只能有一个词
+    split_list = lm_answer.split(locat_str)
+    if len(split_list) > 1 and split_list[1] != '' and not split_list[1].isspace():
+        # 存在定位符,且定位符后不为空，在定位符后找
+        lm_answer = split_list[1]
+        # print("locat str")
+        tokenized_locat_str = tokenizer(locat_str)['input_ids'][:-1]
+        locat_str_loc = _get_sublist_index(mainlist=output_sequence[0].tolist(),sublist=tokenized_locat_str)
+        start_research_loc = locat_str_loc+len(tokenized_locat_str)
+        if re.search(r"\([A-Z].*\)",lm_answer): # (A) 格式，寻找其 最先 出现的位置
+            loc = torch.nonzero(torch.eq(output_sequence[0,start_research_loc:],get_vocab_loc(tokenizer,"▁(")))[0]
+            answerKey_index = get_vocab_loc(tokenizer,answerKey)
+            prob = score[loc+start_research_loc,answerKey_index]
+        else: # text格式，定位在开始处
+            answerKey_index = get_vocab_loc(tokenizer,"▁"+ answerText)
+            prob = score[start_research_loc-1,answerKey_index]
+    else:
+        # 没有定位符，根据答案出现的形式
+        # print("No locat str")
+        if re.search(r"\([A-Z].*\)",lm_answer): # (A) 格式，寻找其 最后 出现的位置
+            loc = torch.nonzero(torch.eq(output_sequence[0],get_vocab_loc(tokenizer,"▁(")))[-1]
+            answerKey_index = get_vocab_loc(tokenizer,answerKey)
+            prob = score[loc,answerKey_index]
+        else: # text格式，定位在开始处
+            answerKey_index = get_vocab_loc(tokenizer,"▁"+ answerText)
+            prob = score[0,answerKey_index]
+
+    prob = prob.item()
+    # print (prob)
+    return lm_answer,prob
+
+
 def get_vocab_loc(tokenizer,target_word):
     # 得到target_word在词表中的索引
 
@@ -131,8 +192,18 @@ def get_vocab_loc(tokenizer,target_word):
     return vocab[target_word]
 
 
+def _get_sublist_index(mainlist,sublist):
+    for i in range(len(mainlist)-len(sublist)+1):
+        if all(mainlist[i+j] == sublist[j] for j in range(len(sublist))):
+            return i
+    return -1
+
+
 def judge_answer(reply,true_answer):
     # true answer的格式应为 ['(key)','text']
+    split_list = reply.split("####")
+    if len(split_list) > 1:
+        reply = split_list[1]
     if len(reply) == 1:
         return true_answer[0][1] == reply
     return true_answer[0] in reply or true_answer[1].lower() in reply.lower()
@@ -332,47 +403,6 @@ def qr2a(model,tokenizer,question,true_answer,rationale,prob=False,few_shot=True
         return prob
 
 
-def q2a_math(model,tokenizer,question,answerNum,prob=False,few_shot=True):
-
-    example = "Answer the following multiple choice question and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
-    ASK_PROMPT = f"Question: {question} Attempted Answer: {answerNum}. Is this answer correct? (A) Yes (B) No "
-    true_answer = ["(A)","Yes"]
-
-    if few_shot:
-        q2a_input = example + ASK_PROMPT + " \nAnswer: "
-    else:
-        q2a_input = ASK_PROMPT + " \nAnswer: "
-    if not prob:
-        q2a_answer = ask_lm(q2a_input,model,tokenizer)
-        print(q2a_answer,end=" ")
-        q2a = judge_answer(q2a_answer,true_answer)
-        return q2a
-    else:
-        q2a,prob = ask_lm_prob(q2a_input,model,tokenizer,true_answer)
-        return prob
-
-
-def qr2a_math(model,tokenizer,question,answerNum,rationale,prob=False,few_shot=True):
-
-    example = "Answer the following multiple choice question and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
-    ASK_PROMPT = f"Question: {question} \nAttempted Answer: {answerNum}. {rationale}\n" + \
-                    "Is this answer correct? (A) Yes (B) No "
-    true_answer = ["(A)","Yes"]
-
-    if few_shot:
-        q2a_input = example + ASK_PROMPT + " \nAnswer: "
-    else:
-        q2a_input = ASK_PROMPT + " \nAnswer: "
-    if not prob:
-        q2a_answer = ask_lm(q2a_input,model,tokenizer)
-        print(q2a_answer,end=" ")
-        q2a = judge_answer(q2a_answer,true_answer)
-        return q2a
-    else:
-        q2a,prob = ask_lm_prob(q2a_input,model,tokenizer,true_answer)
-        return prob
-
-
 def get_answerNum(model,tokenizer,question,few_shot=True):
 
     # example = "Answer the following multiple choice question and follow this format: \n" + MATH_QA_EXAMPLE_PROMPT
@@ -394,31 +424,106 @@ def get_answerNum(model,tokenizer,question,few_shot=True):
         whole_answer = nums[-1]
         return whole_answer
     return None
-        
 
-def q2a_math_perturb(model,tokenizer,question,answerNum,prob=False,few_shot=True):
+
+def q2a_math(model,tokenizer,question,answerNum,prob=False):
+
+    example = "You will receive a question and an attempted answer. " + \
+            "Please judge if the attempted answer is correct and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
+    ASK_PROMPT = "Question: {} Attempted Answer: {}. Is this answer correct? (A) Yes (B) No ."
+    COT_PROMPT = "Please think step by step."
+    ASK_PROMPT = ASK_PROMPT + COT_PROMPT
+    q2a_input = ASK_PROMPT.format(question,answerNum) + " \nAnswer: "
+
+    if not prob:
+        q2a_reasoning = ask_lm(q2a_input,model,tokenizer,math=True,do_sample=True)
+        # print(q2a_reasoning)
+        q2a_rethink_input = example + q2a_input + q2a_reasoning
+        q2a_reply = ask_lm(q2a_rethink_input,model,tokenizer,math=True,do_sample=False)
+        print(q2a_reply)
+        q2a_judge = judge_answer(q2a_reply,["(A)","Yes"])
+        return q2a_judge
+    else:
+        q2a_reasoning = ask_lm(q2a_input,model,tokenizer,math=True,do_sample=True)
+        q2a_rethink_input = example + q2a_input + q2a_reasoning
+        q2a_reply,q2a_prob = ask_lm_prob_math(q2a_rethink_input,model,tokenizer,
+                                                  ["(A)","Yes"],locat_str="####")
+        return q2a_prob
+
+
+def qr2a_math(model,tokenizer,question,answerNum,rationale,prob=False):
+
+    example = "You will receive a question and an attempted answer. " + \
+            "Please judge if the attempted answer is correct and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
+    ASK_PROMPT = "Question: {} Attempted Answer: {}.{}\n Is this answer correct? (A) Yes (B) No ."
+    COT_PROMPT = "Please think step by step."
+    ASK_PROMPT = ASK_PROMPT + COT_PROMPT
+    qr2a_input = ASK_PROMPT.format(question,answerNum,rationale) + " \nAnswer: "
+
+    if not prob:
+        qr2a_reasoning = ask_lm(qr2a_input,model,tokenizer,math=True,do_sample=True)
+        # print(q2a_reasoning)
+        qr2a_rethink_input = example + qr2a_input + qr2a_reasoning
+        qr2a_reply = ask_lm(qr2a_rethink_input,model,tokenizer,math=True,do_sample=False)
+        print(qr2a_reply)
+        qr2a_judge = judge_answer(qr2a_reply,["(A)","Yes"])
+        return qr2a_judge
+    else:
+        qr2a_reasoning = ask_lm(qr2a_input,model,tokenizer,math=True,do_sample=True)
+        qr2a_rethink_input = example + qr2a_input + qr2a_reasoning
+        qr2a_reply,qr2a_prob = ask_lm_prob_math(qr2a_rethink_input,model,tokenizer,
+                                                  ["(A)","Yes"],locat_str="####")
+        return qr2a_prob
+
+
+def q2a_math_perturb(model,tokenizer,question,answerNum,prob=False):
     # 判断模型对于正确答案输出Yes，错误答案输出No的能力
     answerNum = int(answerNum)
     perturb_answer = answerNum + random.choice([x for x in range(-10,11) if x!=0] + [answerNum*2,answerNum//2])
-    example = "Answer the following multiple choice question and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
-    ASK_PROMPT = "Question: {} Attempted Answer: {}. Is this answer correct? (A) Yes (B) No "
+    print(f"Right answerNum: {answerNum} ---- Perturbed answerNum: {perturb_answer}")
+    
+    example = "You will receive a question and an attempted answer. " + \
+            "Please judge if the attempted answer is correct and follow this format: \n" + MATH_TF_EXAMPLE_PROMPT
+    ASK_PROMPT = "Question: {} Attempted Answer: {}. Is this answer correct? (A) Yes (B) No ."
+    COT_PROMPT = "Please think step by step."
+    ASK_PROMPT = ASK_PROMPT + COT_PROMPT
     right_input = ASK_PROMPT.format(question,answerNum) + " \nAnswer: "
     wrong_input = ASK_PROMPT.format(question,perturb_answer)+ " \nAnswer: "
 
-    if few_shot:
-        right_input = example + right_input
-        wrong_input = example + wrong_input
-    
-    print(f"Right answerNum: {answerNum} ---- Perturbed answerNum: {perturb_answer}")
+    # right_input = example + right_input
+    # wrong_input = example + wrong_input
+
     if not prob:
-        right_answer = ask_lm(right_input,model,tokenizer)
-        wrong_answer = ask_lm(wrong_input,model,tokenizer)
-        right_judge = judge_answer(right_answer,["(A)","Yes"])
-        wrong_judge = judge_answer(wrong_answer,["(B)","No"])
+        print("Right inference ------------------")
+        # print(right_input)
+        right_reasoning = ask_lm(right_input,model,tokenizer,math=True,do_sample=True)
+        # print(right_reasoning)
+        right_rethink_input = example + right_input + right_reasoning
+        right_reply = ask_lm(right_rethink_input,model,tokenizer,math=True,do_sample=False)
+        print(right_reply)
+        right_judge = judge_answer(right_reply,["(A)","Yes"])
+
+        print("Wrong inference ------------------")
+        # print(wrong_input)
+        wrong_reasoning = ask_lm(wrong_input,model,tokenizer,math=True,do_sample=True)
+        # print(wrong_reasoning)
+        wrong_rethink_input = example + wrong_input + wrong_reasoning
+        wrong_reply = ask_lm(wrong_rethink_input,model,tokenizer,math=True,do_sample=False)
+        print(wrong_reply)
+        wrong_judge = judge_answer(wrong_reply,["(B)","No"])
+    
         print(f"Judge: Right---{right_judge} ||| Wrong---{wrong_judge}")
         return right_judge,wrong_judge
     else:
-        right_judge,right_prob = ask_lm_prob(right_input,model,tokenizer,["(A)","Yes"])
-        wrong_judge,wrong_prob = ask_lm_prob(wrong_input,model,tokenizer,["(A)","Yes"])
-        print(f"Judge: Right---{right_judge} {right_prob} ||| Wrong---{wrong_judge} {wrong_prob}")
+        right_reasoning = ask_lm(right_input,model,tokenizer,math=True,do_sample=True)
+        right_rethink_input = example + right_input + right_reasoning
+        right_reply,right_prob = ask_lm_prob_math(right_rethink_input,model,tokenizer,
+                                                  ["(A)","Yes"],locat_str="####")
+
+        wrong_reasoning = ask_lm(wrong_input,model,tokenizer,math=True,do_sample=True)
+        wrong_rethink_input = example + wrong_input + wrong_reasoning
+        wrong_reply,wrong_prob = ask_lm_prob_math(wrong_rethink_input,model,tokenizer,
+                                                  ["(A)","Yes"],locat_str="####")
+
+        print(f"Judge: Right---{right_prob} ||| Wrong---{wrong_prob}")
         return right_prob,wrong_prob

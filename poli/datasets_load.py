@@ -475,3 +475,28 @@ def load_dataset_by_line(dir_path):
     dataset = Dataset.from_list(datas)
     print(dataset)
     return dataset
+
+
+def join_passed_failed_data(dataset_name,passed_dir,failed_dir,out_dir):
+    passed_data = load_preprocessed_data(dataset_name,passed_dir)
+    failed_data = load_preprocessed_data(dataset_name,failed_dir)
+    passed_data = passed_data.filter(lambda x:x['Question'] in failed_data['Question'])
+    failed_data = failed_data.filter(lambda x:x['Question'] in passed_data['Question'])
+    fout = open(out_dir,mode="a+")
+
+    for item in passed_data:
+        question = item['Question']
+        true_answer = item['Answer']
+        failed_item = failed_data.filter(lambda x:x['Question']==question)[0]
+        assert failed_item['True Answer'] == true_answer,"The true answer must be the same!"
+        
+        right_rationales = [[true_answer,rationale] for rationale in item['Rationales']]
+        all_rationales = right_rationales + failed_item['Rationales']
+
+        write_in = {'Question':question,
+                    'True Answer':true_answer,
+                    'Rationales':all_rationales}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+    
+    fout.close()
+

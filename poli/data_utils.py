@@ -5,8 +5,8 @@ import os.path
 import re
 from data_process import load_llama,load_t5,generate_ft_data
 from datasets_load import *
-from pre_filter import using_hint_generate_ar,statistic_failed_ar
-from refined_selection import *
+from llama_utils import *
+from t5_utils import *
 from tqdm import tqdm
 import random
 import matplotlib.pyplot as plt
@@ -311,6 +311,22 @@ def select_best_worst(dataset_name, dir_name):
     fworst.close()
 
 
+def select_random(dataset_name,dir_name):
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    frandom = open(os.path.join("../data/finetuning",dataset_name,f"{dir_name}_random.jsonl"),mode="a+")
+
+    for item in dataset:
+        rationales = item['Rationales']
+        rationale = random.choice(rationales)
+        
+        write_in = {"Question":item['Question'],
+                    "Answer":item['Answer'],
+                    "Rationale":rationale}
+        frandom.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+    
+    frandom.close()
+
+
 def statistic_voting(inference_num,wo_data,right_data,wrong_data):
     assert len(wo_data) == len(right_data) and len(right_data) == len(wrong_data), \
         "The num of questions should be the same!"
@@ -389,10 +405,14 @@ def statistic_reward_on_math(small_lm_name,dataset_name,dir_name):
     pbar.close()
 
 
-def verify_math_tf_prob(small_lm_name,dataset_name,dir_name,prob=False):
+def verify_math_tf_prob(lm_name,dataset_name,dir_name,prob=False):
 
     dataset = load_preprocessed_data(dataset_name,dir_name)
-    small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
+    # dataset = dataset.select([1530+x for x in range(300)])
+    if 't5' in lm_name:
+        model,tokenizer = load_t5(model_name=lm_name)
+    else:
+        model,tokenizer = load_llama(model_name=lm_name,quantization=False)
     
     if not prob:
         # 对应4类：right_judge 和 wrong_judge 能否正确
@@ -408,8 +428,10 @@ def verify_math_tf_prob(small_lm_name,dataset_name,dir_name,prob=False):
         print(question)
         answerNum = item['Answer']
 
-        right_judge,wrong_judge = q2a_math_perturb(small_lm,small_tokenizer,question,answerNum,
-                                                   prob,few_shot=True)
+        if 't5' in lm_name:
+            right_judge,wrong_judge = q2a_math_perturb(model,tokenizer,question,answerNum,prob)
+        else:
+            right_judge,wrong_judge = judge_attempted_answer_perturb(model,tokenizer,question,answerNum,prob)
         if not prob:
             if right_judge and wrong_judge:
                 print("JUDGE successfully!!!")
@@ -438,3 +460,62 @@ def verify_math_tf_prob(small_lm_name,dataset_name,dir_name,prob=False):
         plt.figure(figsize=(10,8),dpi=80)
         sns.kdeplot(prob_diff,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
         plt.savefig(f"prob_diff.png")
+
+
+def verify_math_rationale_tf(lm_name,dataset_name,dir_name):
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    dataset = dataset.select([x for x in range(100)])
+    if 't5' in lm_name:
+        model,tokenizer = load_t5(model_name=lm_name)
+    else:
+        model,tokenizer = load_llama(model_name=lm_name,pipeline=False)
+    
+    pbar = tqdm(total=len(dataset))
+    
+    q2a_count = 0
+    total_rationale = 0
+    qr2a_count = 0
+    self_consistency_count = 0
+    def _get_voting_answer(answer_list):
+        counter = Counter(answer_list)
+        return counter.most_common(1)[0][0]
+    for item in dataset:
+
+        print("===================================")
+        question = item['Question']
+        print(question)
+        true_answer = item['True Answer']
+        print(f"True Answer: {true_answer}")
+
+        q2a_judge,q2a_answerNum = judge_attempted_answer_math(model,tokenizer,question,true_answer)
+        if q2a_judge:
+            q2a_count += 1
+        print(f"Q2A judge:{q2a_judge}")
+        
+        qr2a_judge = []
+        qr2a_answerNum = []
+        total_rationale += len(item['Rationales'])
+        for judgeNum,rationale in item['Rationales']:
+            ground_judge = ['(A)','Yes'] if judgeNum == true_answer else ['(B)','No']
+            judge,num = judge_attempted_rationale_math(model,tokenizer,question, 
+                            judgeNum,rationale,ground_judge=ground_judge)
+            qr2a_judge.append(judge)
+            qr2a_answerNum.append(num)
+
+        print(f"QR2A judge:{qr2a_judge}")
+        qr2a_count += sum(qr2a_judge)
+        reply_answerNum = {'q2a':q2a_answerNum,'qr2a':qr2a_answerNum}
+        print(reply_answerNum)
+        voting_answer = _get_voting_answer(qr2a_answerNum)
+        print(f"QR2A Voting answer:{voting_answer}")
+        if voting_answer == true_answer:
+            self_consistency_count += 1
+        
+        pbar.update(1)
+    
+    pbar.close()
+    print(f"Q2A COUNT:{q2a_count}")
+    print(f"QR2A COUNT:{qr2a_count}")
+    print(f"TOTAL Question:{len(dataset)},Rationale:{total_rationale}")
+    print(f"Self_consitency count:{self_consistency_count}")
+

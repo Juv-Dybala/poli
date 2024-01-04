@@ -238,6 +238,7 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
 
     peft_config = create_peft_config(modules, args)
     model = get_peft_model(model, peft_config)
+    print(model.base_model_torch_dtype)
     print_trainable_parameters(model)
 
     # Training parameters
@@ -253,7 +254,7 @@ def dpo_train(model, model_ref, tokenizer, dataset, log_dir, output_dir, args):
             per_device_train_batch_size=args.batch_size, # actual batch_size=micro_batch_size*grad_acc_step
             gradient_accumulation_steps=args.grad_acc_step, 
             warmup_steps=args.warmup,
-            # max_steps=args.max_step,
+            max_steps=args.max_step,
             num_train_epochs=args.train_epoch,
             learning_rate=args.lr,
             fp16=True,
@@ -328,11 +329,13 @@ if __name__ == '__main__':
     bnb_config = create_bnb_config()
     model = AutoModelForCausalLM.from_pretrained(
         model_save_directory,
+        torch_dtype=torch.float16,
         quantization_config=bnb_config,
         device_map = "auto"
         )
     model_ref = AutoModelForCausalLM.from_pretrained(
         model_save_directory,
+        torch_dtype=torch.float16,
         quantization_config=bnb_config,
         device_map = "auto"
         )

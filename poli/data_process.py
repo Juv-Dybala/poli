@@ -1,11 +1,12 @@
 import torch
 import transformers
-from transformers import AutoTokenizer,AutoModelForCausalLM,T5ForConditionalGeneration
+from transformers import AutoTokenizer,AutoModelForCausalLM,T5ForConditionalGeneration,BitsAndBytesConfig
 import os.path
 import re
-from pre_filter import generate_answer,using_qa_generate_rationale,using_opinion_generate_ar, \
-        answer_question,answer_math_question,using_opinion_generate_math_ar
-from refined_selection import select_rationale,get_rationale_type,q2a,qr2a,q2a_math,qr2a_math
+from llama_utils import generate_answer,using_qa_generate_rationale,using_opinion_generate_ar, \
+                        answer_question,answer_math_question,using_opinion_generate_math_ar, \
+                        judge_attempted_answer_math,judge_attempted_rationale_math
+from t5_utils import select_rationale,get_rationale_type,q2a,qr2a,q2a_math,qr2a_math
 from datasets_load import datasets_load,load_preprocessed_data,math_datasets_load
 import json
 import random
@@ -94,26 +95,29 @@ def model_download(model_name):
     model.save_pretrained(pt_save_directory)
 
 
-def load_llama(model_name):
+def load_llama(model_name,pipeline=True):
     
     model_save_directory = os.path.join("../models",model_name) 
 
     tokenizer = AutoTokenizer.from_pretrained(model_save_directory)
+    tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(model_save_directory).to("cuda")
+    if pipeline:
+        model = transformers.pipeline(
+                    task="text-generation", 
+                    model=model, 
+                    tokenizer=tokenizer,
+                    # device_map="auto",
+                    device = "cuda"
+                )
+        
     print(model)
     # model = model.half()
+    print(model.device)
     print(model.dtype)
     print("------------------------------------------------------")
-    
-    large_lm= transformers.pipeline(
-        task="text-generation", 
-        model=model, 
-        tokenizer=tokenizer,
-        # device_map="auto",
-        device = "cuda", 
-        )
 
-    return large_lm,tokenizer
+    return model,tokenizer
 
 
 def load_t5(model_name):
@@ -476,8 +480,8 @@ def generate_dpo_data_by_answer(dataset_name, chosen_dir, rejected_dir, out_dir)
     joined_dataset = chosen_dataset.map(_join_dataset)
     prob = isinstance(joined_dataset[0]['Rationales'][0],list)
     # ANSWER_PROMPT = "The correct answer is {}."
-    ANSWER_PROMPT = " {}."
-    QUESTION_PROMPT = "Question: {}.\nAnswer: The correct answer is"
+    ANSWER_PROMPT = "{}."
+    QUESTION_PROMPT = "Question: {}.\nAnswer: The correct answer is "
 
     print(f"{len(joined_dataset)} Questions to generate dpo pairs.")
     print(joined_dataset)
@@ -544,7 +548,7 @@ def generate_dpo_data_by_answer(dataset_name, chosen_dir, rejected_dir, out_dir)
     fout.close()
 
 
-def generate_dpo_data_by_rationale(dataset_name, dir_name, gap=0.2):
+def generate_dpo_data_by_rationale(dataset_name, dir_name, gap=0.2, top=1):
     # 构建pair-wise data, 格式 prompt、chosen、rejected
     # 利用均回答正确，但rationale不同的data，必须带reward
     dataset = load_preprocessed_data(dataset_name,dir_name)
@@ -553,11 +557,13 @@ def generate_dpo_data_by_rationale(dataset_name, dir_name, gap=0.2):
 
     pbar = tqdm(total=len(dataset))
     pbar.set_description("Generate dpo data...")
-    PROMPT = "Question: {Question}.\nAnswer: The correct answer is {Answer[0]} {Answer[1]}."
+    QUESTION_PROMPT = "Question: {Question}.\nAnswer: The correct answer is "
+    ANSWER_PROMPT = "{Answer[0]} {Answer[1]}."
 
     count_question = 0
     for item in dataset:
-        prompt = PROMPT.format_map(item)
+        prompt = QUESTION_PROMPT.format_map(item)
+        answer = ANSWER_PROMPT.format_map(item)
         rationales = item['Rationales']
         rewards = item['Rewards']
         assert len(rationales)==len(rewards), "The num of rationales and rewards must be the same!"
@@ -571,8 +577,8 @@ def generate_dpo_data_by_rationale(dataset_name, dir_name, gap=0.2):
                     chosen = rationales_with_rewards[i][0]
                     rejected = rationales_with_rewards[j][0]
                     write_in = {'prompt':prompt,
-                                'chosen':chosen,
-                                'rejected':rejected}
+                                'chosen':answer + chosen,
+                                'rejected':answer + rejected}
                     fout.write(json.dumps(write_in,ensure_ascii=False) + "\n")
                     count_pair += 1
 
@@ -584,7 +590,6 @@ def generate_dpo_data_by_rationale(dataset_name, dir_name, gap=0.2):
     print(f"{count_question} questions generated DPO pairs.")
     pbar.close()
     fout.close()
-
 
 
 def step1_generate(large_lm_name,dataset_name,inference_num):
@@ -866,7 +871,7 @@ def step1_generate_math_wrong_opinion(large_lm_name,dataset_name,failed_dir,infe
     fwrong_failed.close()
 
 
-def step2_selection_simple(dataset_name,dir_name,small_lm_name,output):
+def step2_selection_simple_t5(dataset_name,dir_name,small_lm_name,output):
     # QR->A的即通过filter
     dataset = load_preprocessed_data(dataset_name,dir_name)
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
@@ -923,7 +928,7 @@ def step2_selection_simple(dataset_name,dir_name,small_lm_name,output):
     fout.close()
 
 
-def step2_selection(dataset_name,dir_name,small_lm_name,output,duplicate_num=2):
+def step2_selection_t5(dataset_name,dir_name,small_lm_name,output,duplicate_num=2):
     # Q->A且QR->A的保留, Q->WA但QR->A的增加权重（默认翻倍）, Q->A但QR->WA的筛去
     dataset = load_preprocessed_data(dataset_name,dir_name)
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
@@ -983,7 +988,7 @@ def step2_selection(dataset_name,dir_name,small_lm_name,output,duplicate_num=2):
     print(type_count)
 
 
-def step2_selection_prob(dataset_name,dir_name,small_lm_name,output,threshold=-1.0):
+def step2_selection_prob_t5(dataset_name,dir_name,small_lm_name,output,threshold=-1.0):
     # 通过Q->A QR->A 的logits计算得分，大于threshold的通过selection
     dataset = load_preprocessed_data(dataset_name,dir_name)
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
@@ -1051,7 +1056,7 @@ def step2_selection_prob(dataset_name,dir_name,small_lm_name,output,threshold=-1
     plt.savefig(output+".png")
 
 
-def step2_selection_prob_math(dataset_name,dir_name,small_lm_name,output,threshold=-1.0):
+def step2_selection_prob_math_t5(dataset_name,dir_name,small_lm_name,output,threshold=-1.0):
     # 通过Q->A QR->A 的logits计算得分，大于threshold的通过selection
     # 对于数学问题，不要求其回答正确数字，只要回答 yes/no 即可
     dataset = load_preprocessed_data(dataset_name,dir_name)
@@ -1117,7 +1122,7 @@ def step2_selection_prob_math(dataset_name,dir_name,small_lm_name,output,thresho
     plt.savefig(output+".png")
 
 
-def step2_selection_prob_failed(dataset_name,dir_name,small_lm_name,output,threshold=1.0):
+def step2_selection_prob_failed_t5(dataset_name,dir_name,small_lm_name,output,threshold=1.0):
     # 对回答失败数据进行处理，threshold为 上限
     dataset = load_preprocessed_data(dataset_name,dir_name)
     small_lm,small_tokenizer = load_t5(model_name=small_lm_name)
@@ -1174,6 +1179,63 @@ def step2_selection_prob_failed(dataset_name,dir_name,small_lm_name,output,thres
     fout.close()
     print(f"Total #rationale BEFORE: {total}")
     print(f"Pass threshold rationale: {pass_count}")
+    # print(f"All prob lift data: {prob_lift_list}")
+    
+    # 统计 prob lift
+    plt.figure(figsize=(10,8),dpi=80)
+    sns.kdeplot(prob_lift_list,fill=True,color="#01a2d9",alpha=.7,cut=0,clip=(-1,1))
+    plt.savefig(output+".png")
+
+
+def step2_selection_prob_math_llama(dataset_name,dir_name,large_lm_name,output):
+    # 通过Q->A QR->A 的logits计算得分 ，不再使用QR2A-Q2A,直接用QR2A
+    # 对于数学问题，不要求其回答正确数字，只要回答 yes/no 即可
+    dataset = load_preprocessed_data(dataset_name,dir_name)
+    model,tokenizer = load_llama(model_name=large_lm_name,pipeline=False) # 不再使用pipeline
+    output_dir = os.path.join("../data/processed",dataset_name,"{}.jsonl".format(output))
+    fout = open(output_dir,mode="a+")
+
+    total = 0
+    prob_lift_list = []
+
+    pbar = tqdm(total = len(dataset))
+    pbar.set_description("Processing data...")
+
+    print("Select golden rationales. -------------------------------------")
+
+    for item in dataset:
+
+        question = item['Question']
+        print(question)
+        answerNum = item['Answer']
+        print(f"True answerNum: {answerNum}")
+
+        # q2a_prob = judge_attempted_answer_math(model,tokenizer,question,answerNum,prob=True)
+        # print(q2a_prob)
+
+        rationales = item['Rationales']
+        total += len(rationales)
+        rationales_with_rewards = []
+
+        for rationale in rationales:
+            
+            qr2a_prob = judge_attempted_rationale_math(model,tokenizer,question,answerNum,rationale,prob=True)
+            prob_lift = qr2a_prob
+            prob_lift_list.append(prob_lift)
+            print(f"The rationale lifted the {prob_lift} probility to answer correctly!")
+
+            rationales_with_rewards.append([rationale,prob_lift])
+
+        write_in = {"Question":question,
+                    "Answer":answerNum,
+                    "Rationales":rationales_with_rewards}
+        fout.write(json.dumps(write_in, ensure_ascii=False) + "\n")
+        pbar.update(1)
+    
+
+    pbar.close()
+    fout.close()
+    print(f"Total #rationale: {total}")
     # print(f"All prob lift data: {prob_lift_list}")
     
     # 统计 prob lift

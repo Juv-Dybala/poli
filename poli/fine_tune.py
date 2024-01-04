@@ -13,7 +13,7 @@ import json
 import copy
 from eval import inference_eval, ckpt_eval, math_eval
 from datasets_load import datasets_load,math_datasets_load
-from pre_filter import get_math_prompt
+from llama_utils import get_math_prompt
 
 
 QUESTION_PROMPT = {

@@ -10,8 +10,8 @@ from functools import partial
 from tqdm import tqdm
 from datasets_load import *
 from fine_tune import eval
-from pre_filter import extract_ar
-from refined_selection import q2a,qr2a
+from llama_utils import extract_ar
+from t5_utils import q2a,qr2a
 from data_process import load_t5
 import wandb
 

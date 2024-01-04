@@ -6,8 +6,8 @@ from transformers.pipelines.pt_utils import KeyDataset
 from peft import AutoPeftModelForCausalLM
 from datasets_load import datasets_load,math_datasets_load
 from data_process import model_download
-from pre_filter import extract_ar, get_math_prompt
-from refined_selection import q2a, get_answerNum
+from llama_utils import extract_ar, get_math_prompt
+from t5_utils import q2a, get_answerNum
 import time
 from tqdm import tqdm
 import re
@@ -17,8 +17,8 @@ import json
 # 对model利用valid/test数据集进行ACC的评测 
 
 def judge_answer(reply,true_answer):
-    print(reply)
-    print(true_answer)
+    # print(reply)
+    # print(true_answer)
     pattern_str = r"The correct answer is .*?\."
     whole_answer = re.search(pattern_str,reply)
     if not whole_answer:
@@ -253,7 +253,7 @@ def math_eval(model,tokenizer,eval_data,n_shot=0):
             N_SHOT_PROMPT = get_math_prompt(n_shot)
         else:
             N_SHOT_PROMPT = ""
-        print(f"{n_shot} shor prompt:\n" + N_SHOT_PROMPT)
+        print(f"{n_shot} shot prompt:\n" + N_SHOT_PROMPT)
         INPUT_PROMPT = "Question: {}. \nAnswer:"
         for item in eval_data:
             input = N_SHOT_PROMPT + INPUT_PROMPT.format(item['question'])
